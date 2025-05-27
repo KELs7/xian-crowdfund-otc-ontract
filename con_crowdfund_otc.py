@@ -142,31 +142,56 @@ def withdraw_contribution(pool_id: str):
     assert funder and funder["amount_contributed"] > decimal(0.0), 'no contribution to withdraw or already withdrawn.'
 
     can_withdraw = False
-    # Reason 1: Before contribution deadline (and OTC not yet attempted)
+    otc_listing_failed_or_expired = False
+
+    # Condition 1: Contribution window still open, and OTC not yet seriously attempted
     if pool["status"] == "OPEN_FOR_CONTRIBUTION" and now < pool["contribution_deadline"]:
         can_withdraw = True
-    
-    # Reason 2: OTC deal failed or expired, and pool is in refunding state
-    # This state would be set by a manager after checking OTC, or implicitly if exchange_deadline passed
-    if pool["status"] == "REFUNDING": # This status needs to be set by a separate management function or check
-         can_withdraw = True
-    
-    # Reason 3: Implicit refund if exchange window passed and deal not completed
-    if not pool["exchange_completed"] and now > pool["exchange_deadline"]: # 'exchange_completed' is a simplified flag here
-        # More robust: check OTC listing status if listed
-        if pool["otc_listing_id"]:
-            otc_listing_details = I.import_module(metadata['otc_contract']).otc_listing[pool["otc_listing_id"]]
-            if otc_listing_details and (otc_listing_details["status"] == "CANCELLED" or (otc_listing_details["status"] == "OPEN" and now > pool["exchange_deadline"])):
-                can_withdraw = True
-                if pool["status"] != "REFUNDING": # Mark for refund if not already
-                    pool["status"] = "REFUNDING" # Or "OTC_FAILED"
-                    pool_fund[pool_id] = pool
-        else: # Not even listed on OTC, and window passed
-            can_withdraw = True
-            if pool["status"] != "REFUNDING":
-                 pool["status"] = "REFUNDING" # Or "CONTRIBUTIONS_CLOSED_NO_OTC"
-                 pool_fund[pool_id] = pool
+    else: # Contribution window closed or OTC process started
+        assert pool["otc_listing_id"] or now > pool["contribution_deadline"], "Invalid state for this withdrawal path."
 
+        if pool["otc_listing_id"]:
+            # --- Direct Foreign Read ---
+            otc_listings_foreign = ForeignHash(
+                foreign_contract=metadata['otc_contract'],
+                foreign_name='otc_listing'
+            )
+            otc_offer_details = otc_listings_foreign[pool["otc_listing_id"]]
+            # --- End Direct Foreign Read ---
+
+            if otc_offer_details:
+                if otc_offer_details["status"] == "CANCELLED":
+                    otc_listing_failed_or_expired = True
+                elif otc_offer_details["status"] == "OPEN" and now > pool["exchange_deadline"]:
+                    otc_listing_failed_or_expired = True
+                # If EXECUTED, cannot withdraw contribution, must withdraw share
+                elif otc_offer_details["status"] == "EXECUTED":
+                    assert False, "OTC deal was executed. Use withdraw_share() instead."
+            else:
+                # Listing ID exists but no details found on OTC contract - could be an issue, or if OTC prunes old data.
+                # For safety, if past exchange deadline, assume failure for refund.
+                if now > pool["exchange_deadline"]:
+                    otc_listing_failed_or_expired = True
+        
+        # If not listed on OTC at all, and exchange deadline has passed
+        elif not pool["otc_listing_id"] and now > pool["exchange_deadline"] and pool["amount_received"] < pool["soft_cap"]:
+             otc_listing_failed_or_expired = True # Soft cap not met, OTC was not attempted
+        elif not pool["otc_listing_id"] and now > pool["exchange_deadline"] and pool["amount_received"] >= pool["soft_cap"]:
+             # Soft cap was met, but creator didn't list it. Allow refund.
+             otc_listing_failed_or_expired = True
+
+
+    if otc_listing_failed_or_expired:
+        can_withdraw = True
+        # Optionally update local status for record keeping
+        if pool["status"] not in ["OTC_FAILED", "REFUNDING"]:
+            pool["status"] = "OTC_FAILED" # Or "REFUNDING"
+            pool_fund[pool_id] = pool
+            
+            deal_info = otc_deal_info[pool_id]
+            if deal_info: # Should exist if otc_listing_id exists
+                deal_info["status"] = "FAILED_OR_EXPIRED"
+                otc_deal_info[pool_id] = deal_info
 
     assert can_withdraw, 'Withdrawal not allowed at this stage.'
 
@@ -176,7 +201,10 @@ def withdraw_contribution(pool_id: str):
         to=ctx.caller
     )
     pool["amount_received"] -= amount_to_withdraw
-    pool_fund[pool_id] = pool
+    # Only update pool_fund if amount_received changes, to save writes if it's just a status update
+    if pool["amount_received"] != pool_fund[pool_id]["amount_received"] or pool["status"] != pool_fund[pool_id]["status"]:
+        pool_fund[pool_id] = pool
+
 
     funder["amount_contributed"] = decimal(0.0) # Mark as withdrawn
     contributor[ctx.caller, pool_id] = funder
@@ -234,18 +262,45 @@ def withdraw_share(pool_id: str):
     funder = contributor[ctx.caller, pool_id]
 
     assert pool, 'pool does not exist'
-    assert pool["status"] == "OTC_EXECUTED", 'OTC deal not successfully executed yet. Try calling finalize_otc_deal_status.'
     assert funder and funder["amount_contributed"] > decimal(0.0), 'no original contribution to claim a share for.'
     assert not funder["share_withdrawn"], 'share already withdrawn.'
-    assert pool["amount_received"] > decimal(0.0), 'Initial pool amount is zero, cannot calculate share.' # Should not happen if softcap met
+    assert pool["otc_listing_id"], "OTC deal was not initiated for this pool."
+    assert pool["amount_received"] > decimal(0.0), 'Initial pool amount is zero, cannot calculate share.'
 
-    # Calculate share based on actual amount received from otc
-    share_percentage = funder["amount_contributed"] / pool["otc_actual_received_amount"]
+    # --- Direct Foreign Read ---
+    # Create a ForeignHash to read from the otc_listing hash in the OTC contract
+    otc_listings_foreign = ForeignHash(
+        foreign_contract=metadata['otc_contract'],
+        foreign_name='otc_listing' # Name of the Hash in con_otc_exchange
+    )
+    otc_offer_details = otc_listings_foreign[pool["otc_listing_id"]]
+    # --- End Direct Foreign Read ---
+
+    assert otc_offer_details, "OTC listing details not found on the exchange contract."
+    assert otc_offer_details["status"] == "EXECUTED", 'OTC deal not successfully executed on the exchange contract.'
+
+    # If this is the first time seeing it executed, update local state for record keeping (optional but good)
+    if pool["status"] != "OTC_EXECUTED":
+        pool["status"] = "OTC_EXECUTED"
+        # The 'take_amount' in the OTC offer is what the maker (this crowdfund contract) received.
+        pool["otc_actual_received_amount"] = decimal(otc_offer_details["take_amount"])
+        pool_fund[pool_id] = pool
+        
+        # Update otc_deal_info as well
+        deal_info = otc_deal_info[pool_id]
+        if deal_info: # Should exist if otc_listing_id exists
+            deal_info["status"] = "EXECUTED"
+            deal_info["actual_received_amount"] = pool["otc_actual_received_amount"]
+            otc_deal_info[pool_id] = deal_info
+
+
+    # Calculate share based on original contribution to total pooled funds
+    share_percentage = funder["amount_contributed"] / pool["amount_received"]
     
     # The amount to withdraw is this share percentage of the otc_actual_received_amount
     amount_of_take_token_to_withdraw = share_percentage * pool["otc_actual_received_amount"]
 
-    assert amount_of_take_token_to_withdraw > decimal(0.0), "Calculated share is zero."
+    assert amount_of_take_token_to_withdraw > decimal(0.0), "Calculated share is zero or negative."
 
     I.import_module(pool["otc_take_token"]).transfer(
         amount=amount_of_take_token_to_withdraw,
