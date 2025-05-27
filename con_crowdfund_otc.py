@@ -18,8 +18,8 @@ def seed():
     metadata['operator'] = ctx.caller
     metadata['otc_contract'] = 'con_otc' # IMPORTANT: Set to your actual deployed OTC contract name
     metadata['description_length'] = 200
-    metadata['contribution_window'] = 5 * datetime.DAYS # Using the time unit
-    metadata['exchange_window'] = 3 * datetime.DAYS   # Using the time unit
+    metadata['contribution_window'] = datetime.DAYS * 5 
+    metadata['exchange_window'] = datetime.DAYS * 3  
 
 @export
 def change_metadata(key: str, value: Any):
