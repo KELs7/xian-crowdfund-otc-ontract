@@ -3,10 +3,14 @@ balances = Hash(default_value=0)
 metadata = Hash()
 
 @construct
-def seed(vk: str, name: str, symbol: str):
-    balances[vk] = 1_000_000_000
-    metadata['token_name'] = name
-    metadata['token_symbol'] = symbol
+def seed():
+    balances[ctx.caller] = 1_000_000
+
+    metadata['token_name'] = "POOL TOKEN"
+    metadata['token_symbol'] = "PLT"
+    metadata['total_supply'] = balances[ctx.caller]
+    metadata['operator'] = ctx.caller
+
 
 @export
 def transfer(amount: float, to: str):
