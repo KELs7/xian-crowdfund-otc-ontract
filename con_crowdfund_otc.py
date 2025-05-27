@@ -30,7 +30,7 @@ def change_metadata(key: str, value: Any):
 def create_pool(description: str, pool_token: str, hard_cap: float, soft_cap: float):
     assert len(description) <= metadata['description_length'], f"description too long should be <{metadata['description_length']}"
     assert hard_cap > soft_cap, 'hard cap amount should be greater than soft cap amount'
-    assert soft_cap > decimal(0), 'soft cap must be positive'
+    assert soft_cap > decimal("0.0"), 'soft cap must be positive'
 
     token_contract = I.import_module(pool_token)
     assert I.enforce_interface(token_contract, token_interface), 'pool_token contract not XSC001-compliant'
@@ -44,14 +44,14 @@ def create_pool(description: str, pool_token: str, hard_cap: float, soft_cap: fl
         "pool_token": pool_token,
         "contribution_deadline": now + metadata['contribution_window'],
         "exchange_deadline": now + metadata['contribution_window'] + metadata['exchange_window'],
-        "hard_cap": decimal(hard_cap), # Ensure decimals
-        "soft_cap": decimal(soft_cap), # Ensure decimals
-        "amount_received": decimal(0.0),
+        "hard_cap": hard_cap,
+        "soft_cap": soft_cap,
+        "amount_received": decimal("0.0"),
         "pool_creator": ctx.caller,
         "status": "OPEN_FOR_CONTRIBUTION", # "OPEN_FOR_CONTRIBUTION", "PENDING_OTC", "OTC_LISTED", "OTC_EXECUTED", "OTC_FAILED", "REFUNDING"
         "otc_listing_id": None,
         "otc_take_token": None,
-        "otc_actual_received_amount": decimal(0.0) # Amount of take_token actually received
+        "otc_actual_received_amount": decimal("0.0") # Amount of take_token actually received
     }
     return pool_id
 
@@ -62,24 +62,23 @@ def contribute(pool_id: str, amount: float):
     assert pool["status"] == "OPEN_FOR_CONTRIBUTION", 'pool not accepting contributions or in wrong state.'
     assert now < pool["contribution_deadline"], 'contribution window closed.'
 
-    dec_amount = decimal(amount)
-    assert dec_amount > decimal(0.0), 'contribution amount must be positive.'
-    assert pool["amount_received"] + dec_amount <= pool["hard_cap"], 'contribution exceeds hard cap.'
+    assert amount > decimal("0.0"), 'contribution amount must be positive.'
+    assert pool["amount_received"] + amount <= pool["hard_cap"], 'contribution exceeds hard cap.'
 
     # Transfer token from contributor to this contract (con_otc_crowdfund)
     I.import_module(pool["pool_token"]).transfer_from(
-        amount=dec_amount,
+        amount=amount,
         to=ctx.this,
         main_account=ctx.caller
     )
 
-    pool["amount_received"] += dec_amount
+    pool["amount_received"] += amount
     
     funder_info = contributor[ctx.caller, pool_id]
     if funder_info:
-        funder_info["amount_contributed"] += dec_amount
+        funder_info["amount_contributed"] += amount
     else:
-        funder_info = {"amount_contributed": dec_amount, "share_withdrawn": False}
+        funder_info = {"amount_contributed": amount, "share_withdrawn": False}
     
     contributor[ctx.caller, pool_id] = funder_info
     pool_fund[pool_id] = pool
@@ -95,8 +94,7 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
     assert pool["amount_received"] >= pool["soft_cap"], 'Soft cap not met, cannot proceed to OTC.'
     assert pool["otc_listing_id"] is None, 'OTC deal already initiated for this pool.'
 
-    dec_total_take_amount = decimal(otc_total_take_amount)
-    assert dec_total_take_amount > decimal(0.0), "OTC take amount must be positive."
+    assert otc_total_take_amount > decimal("0.0"), "OTC take amount must be positive."
 
     # Verify the take_token contract
     take_token_contract = I.import_module(otc_take_token)
@@ -114,7 +112,7 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
         offer_token=pool["pool_token"],
         offer_amount=pool["amount_received"], # Offer all pooled funds
         take_token=otc_take_token,
-        take_amount=dec_total_take_amount
+        take_amount=otc_total_take_amount
     )
 
     assert listing_id, "Failed to get a listing ID from OTC contract."
@@ -128,7 +126,7 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
     otc_deal_info[pool_id] = { # Store basic info about the attempt
         "listing_id": listing_id,
         "target_take_token": otc_take_token,
-        "target_take_amount": dec_total_take_amount,
+        "target_take_amount": otc_total_take_amount,
         "listed_pool_token_amount": pool["amount_received"]
     }
     return listing_id
@@ -139,7 +137,7 @@ def withdraw_contribution(pool_id: str):
     funder = contributor[ctx.caller, pool_id]
 
     assert pool, 'pool does not exist'
-    assert funder and funder["amount_contributed"] > decimal(0.0), 'no contribution to withdraw or already withdrawn.'
+    assert funder and funder["amount_contributed"] > decimal("0.0"), 'no contribution to withdraw or already withdrawn.'
 
     can_withdraw = False
     otc_listing_failed_or_expired = False
@@ -206,7 +204,7 @@ def withdraw_contribution(pool_id: str):
         pool_fund[pool_id] = pool
 
 
-    funder["amount_contributed"] = decimal(0.0) # Mark as withdrawn
+    funder["amount_contributed"] = decimal("0.0") # Mark as withdrawn
     contributor[ctx.caller, pool_id] = funder
 
 @export
@@ -262,10 +260,10 @@ def withdraw_share(pool_id: str):
     funder = contributor[ctx.caller, pool_id]
 
     assert pool, 'pool does not exist'
-    assert funder and funder["amount_contributed"] > decimal(0.0), 'no original contribution to claim a share for.'
+    assert funder and funder["amount_contributed"] > decimal("0.0"), 'no original contribution to claim a share for.'
     assert not funder["share_withdrawn"], 'share already withdrawn.'
     assert pool["otc_listing_id"], "OTC deal was not initiated for this pool."
-    assert pool["amount_received"] > decimal(0.0), 'Initial pool amount is zero, cannot calculate share.'
+    assert pool["amount_received"] > decimal("0.0"), 'Initial pool amount is zero, cannot calculate share.'
 
     # --- Direct Foreign Read ---
     # Create a ForeignHash to read from the otc_listing hash in the OTC contract
@@ -283,7 +281,7 @@ def withdraw_share(pool_id: str):
     if pool["status"] != "OTC_EXECUTED":
         pool["status"] = "OTC_EXECUTED"
         # The 'take_amount' in the OTC offer is what the maker (this crowdfund contract) received.
-        pool["otc_actual_received_amount"] = decimal(otc_offer_details["take_amount"])
+        pool["otc_actual_received_amount"] = otc_offer_details["take_amount"]
         pool_fund[pool_id] = pool
         
         # Update otc_deal_info as well
@@ -300,7 +298,7 @@ def withdraw_share(pool_id: str):
     # The amount to withdraw is this share percentage of the otc_actual_received_amount
     amount_of_take_token_to_withdraw = share_percentage * pool["otc_actual_received_amount"]
 
-    assert amount_of_take_token_to_withdraw > decimal(0.0), "Calculated share is zero or negative."
+    assert amount_of_take_token_to_withdraw > decimal("0.0"), "Calculated share is zero or negative."
 
     I.import_module(pool["otc_take_token"]).transfer(
         amount=amount_of_take_token_to_withdraw,
