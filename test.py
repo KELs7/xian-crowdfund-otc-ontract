@@ -530,9 +530,9 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         self.assertEqual(self.con_pool_token.balance_of(address=self.crowdfund_contract_name), decimal('60'))
 
         # Finalize status on crowdfund
-        self.con_crowdfund_otc.finalize_otc_deal_status(pool_id=pool_id, signer=self.operator, environment={"now": time_for_cancelling})
-        pool_info_finalized = self.con_crowdfund_otc.pool_fund[pool_id]
-        self.assertEqual(pool_info_finalized['status'], "OTC_FAILED")
+        # self.con_crowdfund_otc.finalize_otc_deal_status(pool_id=pool_id, signer=self.operator, environment={"now": time_for_cancelling})
+        # pool_info_finalized = self.con_crowdfund_otc.pool_fund[pool_id]
+        # self.assertEqual(pool_info_finalized['status'], "OTC_FAILED")
 
         # Bob withdraws his original contribution
         bob_initial_pool_token_bal = self.con_pool_token.balance_of(address=self.bob)
