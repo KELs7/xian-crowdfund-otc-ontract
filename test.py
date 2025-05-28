@@ -456,7 +456,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         time_for_taking_offer = self._get_future_time(time_for_listing, minutes=30)
         self.con_otc.take_offer(
             listing_id=otc_listing_id,
-            amount_to_take=pool_info_after_listing['amount_received'], # Take the full offer
             signer=self.charlie, # Charlie has TakeTokens and approval
             environment={"now": time_for_taking_offer}
         )
