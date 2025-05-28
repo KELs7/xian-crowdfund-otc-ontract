@@ -1,1 +1,1 @@
-builtins = ["construct", "ctx", "decimal", "export", "ForeignHash",  "importlib", "Hash", "hashlib", "now", "Variable", "random", "LogEvent", "datetime", "Any"]
+builtins = ["construct", "ctx", "decimal", "export", "ForeignHash",  "ForeignVariable", "importlib", "Hash", "hashlib", "now", "Variable", "random", "LogEvent", "datetime", "Any"]
