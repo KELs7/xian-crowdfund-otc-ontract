@@ -16,13 +16,28 @@ def seed():
     re_entry_attempt_count.set(0)
     re_entry_max_attempts.set(1) # Only re-enter once for this test
 
+def internal_approve(spender: str, amount_to_approve: float):
+    # print(f"MALICIOUS TOKEN (internal_approve): Owner '{ctx.this}' (this contract) is approving spender '{spender}' for {amount_to_approve}")
+    balances[ctx.this, spender] = amount_to_approve # owner is ctx.this (this contract)
+
 @export
 def configure_re_entrancy(crowdfund_name: str, pool_id: str, amount: float):
-    # In a real scenario, this would be access-controlled
+    # In a real scenario, this would be access-controlled, e.g. by an owner variable
+    # assert ctx.caller == self.owner.get(), "Only owner can configure"
     re_entry_target_crowdfund_name.set(crowdfund_name)
     re_entry_pool_id_for_crowdfund.set(pool_id)
     re_entry_contribution_amount.set(amount)
     # print(f"MALICIOUS TOKEN: Re-entrancy configured for {crowdfund_name}, pool {pool_id}, amount {amount}")
+
+    # --- ADD SELF-APPROVAL LOGIC HERE ---
+    # The contract (ctx.this) needs to approve the crowdfund_name to spend 'amount' of its own tokens.
+    # To do this, ctx.caller inside 'approve' must be ctx.this (the malicious token contract).
+    # This is achieved by calling 'approve' from within this function.
+    if amount > 0 and crowdfund_name:
+        # print(f"MALICIOUS TOKEN: Self-approving {crowdfund_name} for {amount} of its own tokens.")
+        # When this `approve` is called, ctx.caller will be this contract itself (`ctx.this`)
+        # because it's a direct internal call.
+        internal_approve(spender=crowdfund_name, amount_to_approve=amount) # Call the contract's own approve method
 
 @export
 def mint(amount: float, to: str):
