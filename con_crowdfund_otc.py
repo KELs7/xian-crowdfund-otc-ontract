@@ -302,12 +302,8 @@ def withdraw_share(pool_id: str):
             deal_info["actual_received_amount"] = pool["otc_actual_received_amount"]
             otc_deal_info[pool_id] = deal_info
 
-
     # Calculate share based on original contribution to total pooled funds
-    share_percentage = funder["amount_contributed"] / pool["amount_received"]
-    
-    # The amount to withdraw is this share percentage of the otc_actual_received_amount
-    amount_of_take_token_to_withdraw = share_percentage * pool["otc_actual_received_amount"]
+    amount_of_take_token_to_withdraw = (funder["amount_contributed"] * pool["otc_actual_received_amount"]) / pool["amount_received"]
 
     assert amount_of_take_token_to_withdraw > decimal("0.0"), "Calculated share is zero or negative."
 
