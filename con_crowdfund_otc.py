@@ -143,6 +143,52 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
     return listing_id
 
 @export
+def cancel_otc_listing_for_pool(pool_id: str):
+    pool = pool_fund[pool_id]
+    assert pool, "Pool does not exist."
+    assert ctx.caller == pool['pool_creator'] or ctx.caller == metadata['operator'], \
+        "Only pool creator or operator can cancel the OTC listing."
+    
+    assert pool['otc_listing_id'], "No OTC listing ID found for this pool to cancel."
+    # Ensure the pool is in a state where cancellation makes sense (e.g., OTC_LISTED)
+    # or if it's past exchange_deadline and still OPEN on OTC.
+    assert pool['status'] == "OTC_LISTED" or \
+           (pool['status'] == "OTC_FAILED" and now > pool['exchange_deadline']), \
+           "Pool not in a state suitable for OTC cancellation via this function, or OTC listing might not be active."
+
+    otc_contract = I.import_module(metadata['otc_contract'])
+    
+    # Before calling cancel, check the foreign state to ensure it's cancellable on the OTC side
+    otc_listings_foreign = ForeignHash(
+        foreign_contract=metadata['otc_contract'],
+        foreign_name='otc_listing' # Name of the Hash in con_otc_exchange
+    )
+    otc_offer_details = otc_listings_foreign[pool["otc_listing_id"]]
+
+    assert otc_offer_details, "OTC listing details not found on the exchange contract."
+    # Only allow cancellation if the offer is still OPEN on the OTC side.
+    # If it's already EXECUTED or CANCELLED on OTC, this call is redundant or wrong.
+    assert otc_offer_details["status"] == "OPEN", \
+        f"OTC offer is not OPEN (current status: {otc_offer_details['status']}). Cannot cancel via crowdfund if already finalized on OTC."
+
+    # The crowdfund contract (ctx.this) calls cancel_offer on the OTC contract.
+    # The OTC contract's cancel_offer should verify that ctx.caller (con_crowdfund_otc) is the maker.
+    otc_contract.cancel_offer(listing_id=pool['otc_listing_id'])
+
+    # Update pool status after successful cancellation on OTC
+    # The cancel_offer on OTC should have returned the tokens to con_crowdfund_otc
+    pool['status'] = "OTC_FAILED" # Or "PENDING_REFUND", "REFUNDING"
+    # pool['otc_listing_id'] = None # Optionally clear the listing ID, or keep for history
+    pool_fund[pool_id] = pool
+
+    deal_info = otc_deal_info[pool_id]
+    if deal_info:
+        deal_info["status"] = "CANCELLED_VIA_CROWDFUND"
+        otc_deal_info[pool_id] = deal_info
+        
+    return f"OTC listing {pool['otc_listing_id']} for pool {pool_id} cancelled successfully."
+
+@export
 def withdraw_contribution(pool_id: str):
     pool = pool_fund[pool_id]
     funder = contributor[ctx.caller, pool_id]
