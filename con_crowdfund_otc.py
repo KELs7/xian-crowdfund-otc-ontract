@@ -102,6 +102,10 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
 
     otc_contract = I.import_module(metadata['otc_contract'])
     
+    # con_crowdfund_otc (ctx.this) is approving otc_contract_address to spend its pool_tokens
+    pool_token_contract = I.import_module(pool["pool_token"])
+    pool_token_contract.approve(amount=pool['amount_received'], to=metadata['otc_contract'])
+    
     # The crowdfund contract (ctx.this) lists its pooled tokens on the OTC exchange
     # `list_offer` expects `transfer_from` to be callable on `offer_token` from `ctx.caller` (which is `ctx.this` here)
     # Since the tokens are already in `ctx.this`, this is effectively `ctx.this` allowing `otc_contract` to take them.
