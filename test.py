@@ -459,7 +459,7 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
             signer=self.charlie, # Charlie has TakeTokens and approval
             environment={"now": time_for_taking_offer}
         )
-        
+
         otc_offer_details_on_otc = self.con_otc.otc_listing[otc_listing_id]
         self.assertEqual(otc_offer_details_on_otc['status'], "EXECUTED")
         # Verify crowdfund contract (alice, the maker) received take_tokens
@@ -480,8 +480,8 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         # Expected share of take_tokens = (30/70) * 350 = 150
         bob_initial_take_token_bal = self.con_otc_take_token.balance_of(address=self.bob)
         self.con_crowdfund_otc.withdraw_share(pool_id=pool_id, signer=self.bob, environment={"now": time_for_taking_offer})
-        
         bob_final_take_token_bal = self.con_otc_take_token.balance_of(address=self.bob)
+        
         self.assertEqual(bob_final_take_token_bal, bob_initial_take_token_bal + decimal('150'))
         
         bob_contrib_info = self.con_crowdfund_otc.contributor[self.bob, pool_id]
@@ -513,15 +513,16 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         self.con_crowdfund_otc.contribute(pool_id=pool_id, amount=decimal('60'), signer=self.bob, environment={"now": contrib_time})
 
         time_for_listing = self._get_future_time(self.base_time, days=6)
+
         otc_listing_id = self.con_crowdfund_otc.list_pooled_funds_on_otc(
             pool_id=pool_id, otc_take_token=self.take_token_name,
             otc_total_take_amount=decimal('300'), signer=self.alice,
             environment={"now": time_for_listing}
         )
-        
+
         # Alice (maker/pool_creator) cancels the offer on con_otc
         time_for_cancelling = self._get_future_time(time_for_listing, minutes=30)
-        self.con_otc.cancel_offer(listing_id=otc_listing_id, signer=self.alice, environment={"now": time_for_cancelling})
+        self.con_crowdfund_otc.cancel_otc_listing_for_pool(pool_id=pool_id, signer=self.alice, environment={"now": time_for_cancelling})
         
         otc_offer_details_on_otc = self.con_otc.otc_listing[otc_listing_id]
         self.assertEqual(otc_offer_details_on_otc['status'], "CANCELLED")
@@ -609,7 +610,7 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         # This is a gap if finalize_otc_deal_status doesn't trigger a cancellation.
         # For this test to pass withdraw_contribution, the tokens MUST be back in con_crowdfund_otc.
         # Let's assume Alice cancels it on the OTC contract after expiry.
-        self.con_otc.cancel_offer(listing_id=otc_listing_id, signer=self.alice, environment={"now": time_after_otc_expiry})
+        self.con_crowdfund_otc.cancel_otc_listing_for_pool(pool_id=pool_id, signer=self.alice, environment={"now": time_after_otc_expiry})
         self.assertEqual(self.con_pool_token.balance_of(address=self.crowdfund_contract_name), decimal('60'))
 
 
