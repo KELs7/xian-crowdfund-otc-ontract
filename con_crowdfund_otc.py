@@ -112,9 +112,16 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
     # The OTC contract's `list_offer` will internally do a transfer_from itself, with main_account=ctx.this (crowdfund).
     # This is fine as the crowdfund contract is the one calling `list_offer`.
 
+    otc_fee_foreign = ForeignVariable(
+        foreign_contract=metadata['otc_contract'],
+        foreign_name='fee'
+    )
+
+    otc_maker_fee = (pool["amount_received"] * otc_fee_foreign.get()) / 100 
+
     listing_id = otc_contract.list_offer(
         offer_token=pool["pool_token"],
-        offer_amount=pool["amount_received"], # Offer all pooled funds
+        offer_amount=pool["amount_received"] - otc_maker_fee,
         take_token=otc_take_token,
         take_amount=otc_total_take_amount
     )
