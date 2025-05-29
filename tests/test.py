@@ -71,10 +71,7 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         # Crowdfund and OTC contracts have @construct that sets operator/owner to ctx.caller (signer)
         # Token contracts might have one too, e.g., to mint initial supply to the deployer.
         # If your token contracts mint to deployer (`sys`) on construction:
-        print(f"Operator ({self.operator}) balance of pool token: {self.con_pool_token.balance_of(address=self.operator)}")
-        print(f"Operator ({self.operator}) balance of take token: {self.con_otc_take_token.balance_of(address=self.operator)}")
-
-
+       
         # --- Token Distribution ---
         # Assuming the operator ('sys') received all tokens upon submission/construction
         # Distribute pool tokens
@@ -85,13 +82,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         # Distribute take tokens (e.g., to Charlie who might take an OTC offer)
         self.con_otc_take_token.transfer(amount=decimal('5000'), to=self.charlie, signer=self.operator)
         
-        # Verify initial balances for users
-        print(f"Alice pool token balance: {self.con_pool_token.balance_of(address=self.alice)}")
-        print(f"Bob pool token balance: {self.con_pool_token.balance_of(address=self.bob)}")
-        print(f"Charlie pool token balance: {self.con_pool_token.balance_of(address=self.charlie)}")
-        print(f"Charlie take token balance: {self.con_otc_take_token.balance_of(address=self.charlie)}")
-
-
         # --- Approvals ---
         # 1. Users approve crowdfund contract to spend their pool_tokens for contributions
         self.con_pool_token.approve(amount=decimal('500'), to=self.crowdfund_contract_name, signer=self.alice)
@@ -173,11 +163,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         # Base time for controlling "now" in tests
         self.base_time = Datetime(year=2024, month=1, day=1, hour=0, minute=0, second=0)
 
-        
-        print("Setup complete.")
-        print(f"Crowdfund metadata 'otc_contract': {self.con_crowdfund_otc.metadata['otc_contract']}")
-
-
     def tearDown(self):
         self.client.flush()
 
@@ -209,7 +194,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
             signer=self.alice # Alice is the pool_creator
         )
         self.assertIsNotNone(pool_id, "Pool creation failed to return an ID.")
-        print(f"Pool created by Alice with ID: {pool_id}")
 
         pool_info = self.con_crowdfund_otc.pool_fund[pool_id]
         self.assertIsNotNone(pool_info, "Pool info not found after creation.")
@@ -231,7 +215,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         
         bob_contrib_info = self.con_crowdfund_otc.contributor[self.bob, pool_id]
         self.assertEqual(bob_contrib_info['amount_contributed'], contribution_amount_bob)
-        print(f"Bob contributed {contribution_amount_bob} to pool {pool_id}")
 
         # Alice also contributes to her own pool
         contribution_amount_alice = decimal('70')
@@ -247,10 +230,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
 
         alice_contrib_info = self.con_crowdfund_otc.contributor[self.alice, pool_id]
         self.assertEqual(alice_contrib_info['amount_contributed'], contribution_amount_alice)
-        print(f"Alice contributed {contribution_amount_alice} to pool {pool_id}")
-        
-        print(f"Total amount received in pool: {pool_info_after_alice_contrib['amount_received']}")
-
 
     def test_contribution_deadline_respected(self):
         print("\n--- Test: Contribution Deadline Respected ---")
@@ -342,7 +321,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
                 signer=self.bob,
                 environment={"now": time_after_deadline_env} # Mock "now" to be after deadline
             )
-        print(f"Successfully prevented contribution after deadline for pool {pool_id_timed}")
 
     # Add more test cases here for:
     # - Hitting hard_cap
@@ -590,7 +568,7 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         self.con_crowdfund_otc.contribute(pool_id=pool_id, amount=decimal('60'), signer=self.bob, environment={"now": contrib_time})
 
         time_for_listing = self._get_future_time(self.base_time, days=6) # Contrib deadline passed (5 days)
-        
+
         self.con_crowdfund_otc.list_pooled_funds_on_otc(
             pool_id=pool_id, otc_take_token=self.take_token_name,
             otc_total_take_amount=decimal('300'), signer=self.alice,
@@ -667,7 +645,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
             signer=self.operator, 
             environment={"now": pool_creation_time}
         )
-        print(f"Pool {pool_id} created with malicious token {malicious_token_contract_address}.")
 
         # 5. Configure re-entrancy in the malicious token
         attacker_contribution_amount = decimal('70')
@@ -688,7 +665,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         # This state needs to be achieved by `malicious_token_contract_address` calling `approve` for itself.
 
         # 6. Attacker calls `contribute` (outer call)
-        print(f"Attacker ({attacker}) about to contribute {attacker_contribution_amount} to pool {pool_id}.")
         contribute_time = self._get_future_time(pool_creation_time, minutes=5)
         
         initial_amount_received = self.con_crowdfund_otc.pool_fund[pool_id]['amount_received']
@@ -701,16 +677,11 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
             signer=attacker,
             environment={"now": contribute_time}
         )
-        print(f"Attacker's ({attacker}) contribution call finished.")
 
         # 7. Check the state
         pool_state = self.con_crowdfund_otc.pool_fund[pool_id]
         attacker_contribution_info = self.con_crowdfund_otc.contributor[attacker, pool_id]
         malicious_contract_contribution_info = self.con_crowdfund_otc.contributor[malicious_token_contract_address, pool_id]
-
-        print(f"Pool state after re-entrant attempt: {pool_state}")
-        print(f"Attacker's contribution info: {attacker_contribution_info}")
-        print(f"Malicious contract's contribution info: {malicious_contract_contribution_info}")
 
         # Assertions based on the observed test outcome (actual amount_received is 100)
         # This means the re-entrancy did not cause amount_received to be overwritten by stale state from the outer call.
