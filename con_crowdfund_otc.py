@@ -264,52 +264,6 @@ def withdraw_contribution(pool_id: str):
     funder["amount_contributed"] = decimal("0.0") # Mark as withdrawn
     contributor[ctx.caller, pool_id] = funder
 
-# @export
-# def finalize_otc_deal_status(pool_id: str):
-#     """
-#     A function callable by anyone (or pool_creator) to update the pool's status
-#     based on the OTC exchange. This helps manage state transitions.
-#     """
-#     pool = pool_fund[pool_id]
-#     assert pool, "Pool does not exist."
-#     assert pool["otc_listing_id"], "Pool was not listed on OTC."
-#     # Prevent unnecessary calls if already finalized
-#     assert pool["status"] == "OTC_LISTED", "Pool not in OTC_LISTED state."
-#     assert now > pool["contribution_deadline"], "Too early to finalize." # Can be called during exchange window
-
-#     otc_contract = I.import_module(metadata['otc_contract'])
-#     otc_offer_details = otc_contract.otc_listing[pool["otc_listing_id"]] # Assumes otc_listing is a public hash
-
-#     assert otc_offer_details, "OTC listing details not found."
-
-#     if otc_offer_details["status"] == "EXECUTED":
-#         pool["status"] = "OTC_EXECUTED"
-#         # Record the actual amount of take_token this contract should have received.
-#         # The OTC contract transfers `otc_offer_details["take_amount"]` to the maker (`ctx.this`).
-#         pool["otc_actual_received_amount"] = otc_offer_details["take_amount"]
-#         pool_fund[pool_id] = pool
-        
-#         # Update otc_deal_info as well
-#         deal_info = otc_deal_info[pool_id]
-#         if deal_info:
-#             deal_info["status"] = "EXECUTED"
-#             deal_info["actual_received_amount"] = otc_offer_details["take_amount"]
-#             otc_deal_info[pool_id] = deal_info
-
-#     elif otc_offer_details["status"] == "CANCELLED" or (otc_offer_details["status"] == "OPEN" and now > pool["exchange_deadline"]):
-#         pool["status"] = "OTC_FAILED" # Or "REFUNDING"
-#         pool_fund[pool_id] = pool
-#         deal_info = otc_deal_info[pool_id]
-#         if deal_info:
-#             deal_info["status"] = "FAILED_OR_EXPIRED"
-#             otc_deal_info[pool_id] = deal_info
-#     # If still "OPEN" and within exchange_deadline, do nothing, let it play out.
-#     else:
-#         # Still open and within window
-#         return "OTC deal still open."
-        
-#     return f"Pool status updated to {pool['status']}"
-
 
 @export
 def withdraw_share(pool_id: str):
