@@ -210,7 +210,7 @@ class TestCrowdfundContractMoreCases(unittest.TestCase):
         self.assertEqual(pool_info['status'], "OTC_LISTED")
 
         # Attempt to list again when already listed
-        with self.assertRaisesRegex(AssertionError, "Pool not in correct state to list on OTC."):
+        with self.assertRaisesRegex(AssertionError, "OTC deal already initiated for this pool."):
             self.con_crowdfund_otc.list_pooled_funds_on_otc(
                 pool_id=pool_id, otc_take_token=self.take_token_name,
                 otc_total_take_amount=decimal('100'), signer=self.alice,
