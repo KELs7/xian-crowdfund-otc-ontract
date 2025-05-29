@@ -39,7 +39,7 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         # Adjust paths as per your actual project structure.
         # Assuming contracts are in a 'contracts' subdirectory relative to the project root,
         # and tests are in a 'tests' subdirectory.
-        contracts_dir = current_dir.parent # Or adjust to your project's root/contracts dir
+        contracts_dir = current_dir.parent.parent # Or adjust to your project's root/contracts dir
 
         with open(contracts_dir / "con_crowdfund_otc.py") as f:
             code = f.read()

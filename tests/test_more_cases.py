@@ -21,7 +21,7 @@ class TestCrowdfundContractMoreCases(unittest.TestCase):
         self.take_token_name = "con_otc_take_token"
         self.malicious_token_name = "con_malicious_reentrant_token" # For completeness if needed
 
-        current_dir = Path(__file__).resolve().parent
+        current_dir = Path(__file__).resolve().parent.parent
 
         with open(current_dir / "con_crowdfund_otc.py") as f:
             self.client.submit(f.read(), name=self.crowdfund_contract_name, signer=self.operator)
