@@ -111,13 +111,12 @@ def create_pool(description: str, pool_token: str, hard_cap: float, soft_cap: fl
 def contribute(pool_id: str, amount: float):
     pool = pool_fund[pool_id]
     assert pool, 'pool does not exist'
-    # assert pool["status"] == "OPEN_FOR_CONTRIBUTION", 'pool not accepting contributions or in wrong state.'
     assert now < pool["contribution_deadline"], 'contribution window closed.'
 
     assert amount > decimal("0.0"), 'contribution amount must be positive.'
     assert pool["amount_received"] + amount <= pool["hard_cap"], 'contribution exceeds hard cap.'
 
-    # Transfer token from contributor to this contract (con_otc_crowdfund)
+    # Transfer token from contributor to this contract (con_crowdfund_otc)
     I.import_module(pool["pool_token"]).transfer_from(
         amount=amount,
         to=ctx.this,
@@ -160,12 +159,8 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
     pool_token_contract = I.import_module(pool["pool_token"])
     pool_token_contract.approve(amount=pool['amount_received'], to=metadata['otc_contract'])
     
-    # The crowdfund contract (ctx.this) lists its pooled tokens on the OTC exchange
-    # `list_offer` expects `transfer_from` to be callable on `offer_token` from `ctx.caller` (which is `ctx.this` here)
-    # Since the tokens are already in `ctx.this`, this is effectively `ctx.this` allowing `otc_contract` to take them.
-    # The OTC contract's `list_offer` will internally do a transfer_from itself, with main_account=ctx.this (crowdfund).
-    # This is fine as the crowdfund contract is the one calling `list_offer`.
-
+    # con_crowdfund_otc pays maker fee for making an otc offer.
+    # maker fee is deducted from pool tokens
     otc_fee_foreign = ForeignVariable(
         foreign_contract=metadata['otc_contract'],
         foreign_name='fee'
@@ -175,7 +170,7 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
 
     listing_id = otc_contract.list_offer(
         offer_token=pool["pool_token"],
-        offer_amount=pool["amount_received"] - otc_maker_fee,
+        offer_amount=pool["amount_received"] - otc_maker_fee, # the remaining pool tokens will be deducted to cover fee
         take_token=otc_take_token,
         take_amount=otc_total_take_amount
     )
@@ -242,7 +237,6 @@ def cancel_otc_listing_for_pool(pool_id: str):
     # Update pool status after successful cancellation on OTC
     # The cancel_offer on OTC should have returned the tokens to con_crowdfund_otc
     pool['status'] = "OTC_FAILED" # Or "PENDING_REFUND", "REFUNDING"
-    # pool['otc_listing_id'] = None # Optionally clear the listing ID, or keep for history
     pool_fund[pool_id] = pool
 
     deal_info = otc_deal_info[pool_id]
