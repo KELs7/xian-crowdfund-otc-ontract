@@ -254,15 +254,13 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
 
     def test_contribution_deadline_respected(self):
         print("\n--- Test: Contribution Deadline Respected ---")
-        pool_id = self.con_crowdfund_otc.create_pool(
+        self.con_crowdfund_otc.create_pool(
             description="Deadline Test Pool",
             pool_token=self.pool_token_name,
             hard_cap=decimal('100'),
             soft_cap=decimal('10'),
             signer=self.alice
         )
-        pool_info = self.con_crowdfund_otc.pool_fund[pool_id]
-        contribution_deadline = pool_info['contribution_deadline'] # This is a Datetime object
 
         # Try to contribute after the deadline
         # We need to simulate time passing. The 'environment' kwarg is key.
@@ -332,8 +330,6 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
             signer=self.alice,
             environment={"now": creation_env_time} # Control "now" for pool creation
         )
-        pool_info_timed = self.con_crowdfund_otc.pool_fund[pool_id_timed]
-        actual_contribution_deadline = pool_info_timed['contribution_deadline'] # This is now creation_env_time + 5 days
 
         # Now, construct a time that is definitely after this deadline.
         # If deadline is Jan 1 + 5 days = Jan 6. Let's try Jan 7.
@@ -594,7 +590,8 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         self.con_crowdfund_otc.contribute(pool_id=pool_id, amount=decimal('60'), signer=self.bob, environment={"now": contrib_time})
 
         time_for_listing = self._get_future_time(self.base_time, days=6) # Contrib deadline passed (5 days)
-        otc_listing_id = self.con_crowdfund_otc.list_pooled_funds_on_otc(
+        
+        self.con_crowdfund_otc.list_pooled_funds_on_otc(
             pool_id=pool_id, otc_take_token=self.take_token_name,
             otc_total_take_amount=decimal('300'), signer=self.alice,
             environment={"now": time_for_listing}

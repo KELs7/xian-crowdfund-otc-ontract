@@ -380,7 +380,7 @@ class TestCrowdfundContractMoreCases(unittest.TestCase):
             environment={"now": self._get_future_time(time_for_listing, days=1)}
         )
         self.con_crowdfund_otc.contribute(pool_id=pool_id_cancel, amount=decimal('20'), signer=self.bob, environment={"now": self._get_future_time(contrib_time, days=6)})
-        otc_listing_id_cancel = self.con_crowdfund_otc.list_pooled_funds_on_otc(
+        self.con_crowdfund_otc.list_pooled_funds_on_otc(
             pool_id=pool_id_cancel, otc_take_token=self.take_token_name,
             otc_total_take_amount=decimal('100'), signer=self.alice,
             environment={"now": self._get_future_time(time_for_listing, days=7)}
