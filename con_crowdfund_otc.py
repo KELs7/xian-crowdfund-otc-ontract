@@ -13,6 +13,45 @@ token_interface = [
     importlib.Func('balance_of', args=('address',)),
 ]
 
+# Events
+PoolCreated = LogEvent(
+    event="pool_created", 
+    params={
+        "id":{'type':str, 'idx':True}, 
+        "description": {'type':str, 'idx':False},
+        "pool_token": {'type':str, 'idx':False}, 
+        "hard_cap": {'type':(int, float, decimal)},
+        "soft_cap": {'type':(int, float, decimal)},
+        "contribution_deadline": {'type':str, 'idx':False},
+        "exchange_deadline": {'type':str, 'idx':False}
+    })
+
+PoolListedOTC = LogEvent(
+    event="pool_listed_on_otc", 
+    params={
+        "otc_listing_id":{'type':str, 'idx':True}, 
+        "pool_id": {'type':str, 'idx':False},
+        "pool_token": {'type':str, 'idx':False}, 
+        "pool_token_amount": {'type':(int, float, decimal)},
+        "otc_take_token": {'type':str, 'idx':False},
+        "otc_total_take_amount": {'type':(int, float, decimal)}
+    })
+
+CancelledListing = LogEvent(
+    event="listing_cancelled", 
+    params={
+        "otc_listing_id":{'type':str, 'idx':True}, 
+        "pool_id": {'type':str, 'idx':False},
+    })
+
+Contribution = LogEvent(
+    event="contribution", 
+    params={ 
+        "pool_id": {'type':str, 'idx':True},
+        "amount": {'type':(int, float, decimal)},
+        "pool_amount": {'type':(int, float, decimal)}
+    })
+
 @construct
 def seed():
     metadata['operator'] = ctx.caller
@@ -53,6 +92,19 @@ def create_pool(description: str, pool_token: str, hard_cap: float, soft_cap: fl
         "otc_take_token": None,
         "otc_actual_received_amount": decimal("0.0") # Amount of take_token actually received
     }
+
+    pool = pool_fund[pool_id]
+
+    PoolCreated({
+        "id": pool_id, 
+        "description": pool["description"],
+        "pool_token": pool["pool_token"], 
+        "hard_cap": pool["hard_cap"],
+        "soft_cap": pool["soft_cap"],
+        "contribution_deadline": str(pool["contribution_deadline"]),
+        "exchange_deadline": str(pool["exchange_deadline"])
+    })
+
     return pool_id
 
 @export
@@ -82,6 +134,8 @@ def contribute(pool_id: str, amount: float):
     
     contributor[ctx.caller, pool_id] = funder_info
     pool_fund[pool_id] = pool
+
+    Contribution({"pool_id": pool_id, "amount": amount, "pool_amount": pool["amount_received"]})
 
 @export
 def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_amount: float):
@@ -140,6 +194,16 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
         "target_take_amount": otc_total_take_amount,
         "listed_pool_token_amount": pool["amount_received"]
     }
+
+    PoolListedOTC({
+        "otc_listing_id":listing_id, 
+        "pool_id": pool_id,
+        "pool_token": pool["pool_token"],
+        "pool_token_amount": pool["amount_received"], 
+        "otc_take_token": otc_take_token,
+        "otc_total_take_amount": otc_total_take_amount
+    })
+
     return listing_id
 
 @export
@@ -185,8 +249,8 @@ def cancel_otc_listing_for_pool(pool_id: str):
     if deal_info:
         deal_info["status"] = "CANCELLED_VIA_CROWDFUND"
         otc_deal_info[pool_id] = deal_info
-        
-    return f"OTC listing {pool['otc_listing_id']} for pool {pool_id} cancelled successfully."
+
+    CancelledListing({"otc_listing_id": pool['otc_listing_id'], "pool_id": pool_id})
 
 @export
 def withdraw_contribution(pool_id: str):
