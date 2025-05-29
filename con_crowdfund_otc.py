@@ -111,7 +111,7 @@ def create_pool(description: str, pool_token: str, hard_cap: float, soft_cap: fl
 def contribute(pool_id: str, amount: float):
     pool = pool_fund[pool_id]
     assert pool, 'pool does not exist'
-    assert pool["status"] == "OPEN_FOR_CONTRIBUTION", 'pool not accepting contributions or in wrong state.'
+    # assert pool["status"] == "OPEN_FOR_CONTRIBUTION", 'pool not accepting contributions or in wrong state.'
     assert now < pool["contribution_deadline"], 'contribution window closed.'
 
     assert amount > decimal("0.0"), 'contribution amount must be positive.'
@@ -142,7 +142,7 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
     pool = pool_fund[pool_id]
     assert pool, 'pool does not exist'
     assert ctx.caller == pool["pool_creator"], 'Only pool creator can initiate OTC listing.'
-    assert pool["status"] == "OPEN_FOR_CONTRIBUTION" or pool["status"] == "PENDING_OTC", "Pool not in correct state to list on OTC."
+    # assert pool["status"] == "OPEN_FOR_CONTRIBUTION" or pool["status"] == "PENDING_OTC", "Pool not in correct state to list on OTC."
     assert now > pool["contribution_deadline"], 'Cannot list on OTC before contribution deadline.'
     assert now < pool["exchange_deadline"], 'Exchange window has passed for OTC listing.'
     assert pool["amount_received"] >= pool["soft_cap"], 'Soft cap not met, cannot proceed to OTC.'
@@ -264,7 +264,7 @@ def withdraw_contribution(pool_id: str):
     otc_listing_failed_or_expired = False
 
     # Condition 1: Contribution window still open, and OTC not yet seriously attempted
-    if pool["status"] == "OPEN_FOR_CONTRIBUTION" and now < pool["contribution_deadline"]:
+    if now < pool["contribution_deadline"]:
         can_withdraw = True
     else: # Contribution window closed or OTC process started
         assert pool["otc_listing_id"] or now > pool["contribution_deadline"], "Invalid state for this withdrawal path."
