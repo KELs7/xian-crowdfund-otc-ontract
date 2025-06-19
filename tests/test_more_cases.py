@@ -680,6 +680,103 @@ class TestCrowdfundContractMoreCases(unittest.TestCase):
         
     #     self.assertTrue(self.con_crowdfund_otc.contributor[mt_address, pool_id]['share_withdrawn'])
 
+    def test_vulnerability_funds_trapped_if_otc_offer_expires_open_and_unresponsive_creator(self):
+        print("\n--- Test: FIX VERIFICATION - Funds Trapped if OTC Offer Expires Open (Creator Unresponsive) ---")
+        
+        original_otc_contract_fee = self.con_otc.fee.get()
+        self.con_otc.adjust_fee(trading_fee=decimal('0.0'), signer=self.operator)
+
+        pool_creation_time = self._get_future_time(self.base_time, hours=2) 
+        pool_id = self.con_crowdfund_otc.create_pool(
+            description="Trap Test Pool Fix", 
+            pool_token=self.pool_token_name,
+            hard_cap=decimal('100'), 
+            soft_cap=decimal('10'), 
+            signer=self.alice,
+            environment={"now": pool_creation_time}
+        )
+        
+        contribution_amount = decimal('50')
+        contrib_time = self._get_future_time(pool_creation_time, days=1)
+
+        # Balances before Bob contributes to this specific pool
+        bob_pt_bal_before_contrib_scenario = self.con_pool_token.balance_of(address=self.bob)
+        cf_pt_bal_before_contrib_scenario = self.con_pool_token.balance_of(address=self.crowdfund_contract_name)
+        otc_pt_bal_before_contrib_scenario = self.con_pool_token.balance_of(address=self.otc_contract_name) # Balance before any activity for this pool
+        
+        self.con_crowdfund_otc.contribute(
+            pool_id=pool_id, 
+            amount=contribution_amount, 
+            signer=self.bob, 
+            environment={"now": contrib_time}
+        )
+        # CF contract's balance of pool_token for this pool is now +contribution_amount
+        self.assertEqual(self.con_pool_token.balance_of(address=self.crowdfund_contract_name), 
+                         cf_pt_bal_before_contrib_scenario + contribution_amount)
+
+        # Alice lists on OTC. 
+        time_for_listing = self._get_future_time(pool_creation_time, days=6) 
+        otc_listing_id = self.con_crowdfund_otc.list_pooled_funds_on_otc(
+            pool_id=pool_id, 
+            otc_take_token=self.take_token_name,
+            otc_total_take_amount=decimal('200'), 
+            signer=self.alice,
+            environment={"now": time_for_listing}
+        )
+        
+        # Pool tokens moved from CF to OTC
+        self.assertEqual(self.con_pool_token.balance_of(address=self.crowdfund_contract_name), 
+                         cf_pt_bal_before_contrib_scenario, 
+                         "CF balance incorrect after listing")
+        self.assertEqual(self.con_pool_token.balance_of(address=self.otc_contract_name), 
+                         otc_pt_bal_before_contrib_scenario + contribution_amount, 
+                         "OTC balance incorrect after listing")
+        
+        otc_offer_details_on_otc_before_expiry = self.con_otc.otc_listing[otc_listing_id]
+        self.assertEqual(otc_offer_details_on_otc_before_expiry['status'], "OPEN", "OTC offer not OPEN after listing")
+
+        # Time passes beyond exchange deadline. 
+        time_after_otc_expiry = self._get_future_time(pool_creation_time, days=9) 
+
+        # Bob attempts to withdraw. The fix should auto-cancel the OTC offer.
+        self.con_crowdfund_otc.withdraw_contribution(
+            pool_id=pool_id, 
+            signer=self.bob, 
+            environment={"now": time_after_otc_expiry}
+        )
+        
+        # Verify Bob's balance is restored
+        self.assertEqual(self.con_pool_token.balance_of(address=self.bob), 
+                         bob_pt_bal_before_contrib_scenario, 
+                         "Bob's balance not restored after successful withdraw")
+        
+        # Verify tokens moved back from OTC to CF, then CF paid Bob.
+        # CF's final balance for this pool's token should be back to its state before Bob's contribution for this pool.
+        self.assertEqual(self.con_pool_token.balance_of(address=self.crowdfund_contract_name), 
+                         cf_pt_bal_before_contrib_scenario, 
+                         "CF balance incorrect after successful withdraw and auto-cancellation")
+        # OTC's final balance for this pool's token should be back to its state before this pool's listing.
+        self.assertEqual(self.con_pool_token.balance_of(address=self.otc_contract_name), 
+                         otc_pt_bal_before_contrib_scenario, 
+                         "OTC balance incorrect after successful withdraw and auto-cancellation")
+
+        # Verify pool status in CF contract is OTC_FAILED
+        pool_info_after_withdraw = self.con_crowdfund_otc.pool_fund[pool_id]
+        self.assertEqual(pool_info_after_withdraw['status'], "OTC_FAILED", "Pool status not OTC_FAILED after withdraw")
+        
+        # Verify OTC offer status on OTC contract is CANCELLED due to auto-cancellation
+        otc_offer_details_on_otc_after_withdraw = self.con_otc.otc_listing[otc_listing_id]
+        self.assertEqual(otc_offer_details_on_otc_after_withdraw['status'], "CANCELLED", "OTC offer status not CANCELLED after auto-cancellation")
+
+        # Verify Bob's contribution info in CF contract shows 0 amount contributed
+        bob_contrib_info_after_withdraw = self.con_crowdfund_otc.contributor[self.bob, pool_id]
+        self.assertIsNotNone(bob_contrib_info_after_withdraw, "Bob's contribution info missing")
+        self.assertEqual(bob_contrib_info_after_withdraw['amount_contributed'], decimal('0'), "Bob's recorded contribution not zeroed out")
+
+        print(f"Fix Confirmed: Bob successfully withdrew his {contribution_amount} {self.pool_token_name} after OTC offer expired open, due to auto-cancellation.")
+
+        self.con_otc.adjust_fee(trading_fee=original_otc_contract_fee, signer=self.operator)
+
 if __name__ == '__main__':
     # This allows running the tests from the command line
     # You might need to adjust Python's path if contracting module is not found

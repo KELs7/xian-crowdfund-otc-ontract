@@ -278,64 +278,96 @@ def withdraw_contribution(pool_id: str):
 
     can_withdraw = False
     otc_listing_failed_or_expired = False
-    new_pool_status_for_effect = pool["status"] # Start with current status
+    new_pool_status_for_effect = pool["status"] # Start with current status, may change
+    auto_cancelled_otc_in_this_tx = False # Flag to track if we auto-cancelled
 
     if now < pool["contribution_deadline"]:
+        # Early withdrawal before contribution deadline
         can_withdraw = True
     else: 
-        assert pool["otc_listing_id"] or now > pool["contribution_deadline"], \
-            "Invalid state for this withdrawal path."
+        # After contribution deadline. Withdrawal depends on pool/OTC state.
+        assert pool["otc_listing_id"] or now > pool["exchange_deadline"], \
+            "Withdrawal attempted in an unexpected state after contribution deadline."
 
         if pool["otc_listing_id"]:
-            otc_listings_foreign = ForeignHash(foreign_contract=metadata['otc_contract'], foreign_name='otc_listing')
+            # Pool was listed on OTC, check its status on the OTC contract
+            otc_contract_address = metadata['otc_contract']
+            otc_contract = I.import_module(otc_contract_address)
+            otc_listings_foreign = ForeignHash(foreign_contract=otc_contract_address, foreign_name='otc_listing')
             otc_offer_details = otc_listings_foreign[pool["otc_listing_id"]]
+
             if otc_offer_details:
-                if otc_offer_details["status"] == "CANCELLED": 
+                if otc_offer_details["status"] == "CANCELLED":
                     otc_listing_failed_or_expired = True
-                elif otc_offer_details["status"] == "OPEN" and now > pool["exchange_deadline"]: 
+                    if new_pool_status_for_effect != "OTC_FAILED":
+                        new_pool_status_for_effect = "OTC_FAILED"
+
+                elif otc_offer_details["status"] == "OPEN" and now > pool["exchange_deadline"]:
+                    # ---- FIX APPLIED HERE ----
+                    # OTC listing is still OPEN but EXPIRED.
+                    # The crowdfund contract (as maker of the OTC offer) must cancel it to retrieve tokens.
+                    otc_contract.cancel_offer(listing_id=pool["otc_listing_id"])
+                    # After successful cancellation, the pool_tokens are returned to this crowdfund contract.
+                    auto_cancelled_otc_in_this_tx = True # Mark that we performed cancellation
+                    # ---- END OF FIX APPLICATION ----
+                    
                     otc_listing_failed_or_expired = True
-                elif otc_offer_details["status"] == "EXECUTED": 
+                    new_pool_status_for_effect = "OTC_FAILED" 
+
+                elif otc_offer_details["status"] == "EXECUTED":
                     assert False, "OTC deal was executed. Use withdraw_share() instead."
-            else:
-                if now > pool["exchange_deadline"]: 
+            else: 
+                if now > pool["exchange_deadline"]:
                     otc_listing_failed_or_expired = True
+                    if new_pool_status_for_effect != "OTC_FAILED":
+                        new_pool_status_for_effect = "OTC_FAILED"
         
-        elif not pool["otc_listing_id"] and now > pool["exchange_deadline"]: # Not listed, deadlines passed
-             if pool["amount_received"] < pool["soft_cap"] or \
-                pool["amount_received"] >= pool["soft_cap"]: # Soft cap met or not, but creator didn't list
-                 otc_listing_failed_or_expired = True
+        elif not pool["otc_listing_id"] and now > pool["exchange_deadline"]:
+            otc_listing_failed_or_expired = True
+            if new_pool_status_for_effect != "OTC_FAILED" and new_pool_status_for_effect != "REFUNDING":
+                 new_pool_status_for_effect = "OTC_FAILED"
 
     if otc_listing_failed_or_expired:
         can_withdraw = True
-        if pool["status"] not in ["OTC_FAILED", "REFUNDING"]:
-            new_pool_status_for_effect = "OTC_FAILED"
+        if new_pool_status_for_effect == pool["status"] and pool["status"] not in ["OTC_FAILED", "REFUNDING"]:
+             new_pool_status_for_effect = "OTC_FAILED"
 
     assert can_withdraw, 'Withdrawal not allowed at this stage.'
 
     amount_to_withdraw = funder["amount_contributed"]
 
-    # --- EFFECTS (BEFORE INTERACTION) ---
-    # 1. Update pool state (amount_received and status if changed)
+    # --- EFFECTS (BEFORE INTERACTION of refunding to user) ---
     pool["amount_received"] -= amount_to_withdraw
-    if pool["status"] != new_pool_status_for_effect:
+    if pool["status"] != new_pool_status_for_effect: 
         pool["status"] = new_pool_status_for_effect
     pool_fund[pool_id] = pool
     
-    # 2. Update otc_deal_info if status changed due to failure/expiry
-    if new_pool_status_for_effect == "OTC_FAILED":
+    if new_pool_status_for_effect == "OTC_FAILED" and pool["otc_listing_id"]:
         deal_info = otc_deal_info[pool_id]
-        if deal_info: 
-            if deal_info.get("status") not in ["FAILED_OR_EXPIRED", "CANCELLED", "EXECUTED"]:
-                deal_info["status"] = "FAILED_OR_EXPIRED"
-                otc_deal_info[pool_id] = deal_info
+        if deal_info and deal_info.get("status") not in ["FAILED_OR_EXPIRED", "CANCELLED", "EXECUTED"]:
+             
+            if auto_cancelled_otc_in_this_tx:
+                deal_info["status"] = "CANCELLED" # Explicitly cancelled by this transaction
+            else:
+                # If not auto-cancelled here, but still failed, check foreign status for precision if needed,
+                # or default to FAILED_OR_EXPIRED.
+                # For simplicity, if it's failed and wasn't executed, and we didn't just cancel it,
+                # it might have been cancelled by creator/operator, or truly expired without recovery attempt yet.
+                # If already CANCELLED on OTC (by creator/op), that state should remain.
+                otc_listings_check = ForeignHash(foreign_contract=metadata['otc_contract'], foreign_name='otc_listing')
+                otc_offer_check_details = otc_listings_check[pool["otc_listing_id"]]
+                if otc_offer_check_details and otc_offer_check_details['status'] == 'CANCELLED':
+                    deal_info["status"] = 'CANCELLED'
+                else:
+                    deal_info["status"] = "FAILED_OR_EXPIRED"
+            otc_deal_info[pool_id] = deal_info
             
-    # 3. Update funder's contribution info (mark as withdrawn)
-    funder["amount_contributed"] = decimal("0.0")
+    funder["amount_contributed"] = decimal("0.0") 
     contributor[ctx.caller, pool_id] = funder
     
-    # --- INTERACTION ---
-    token_contract_module = I.import_module(pool["pool_token"])
-    token_contract_module.transfer(
+    # --- INTERACTION (Refunding to user) ---
+    pool_token_contract_module = I.import_module(pool["pool_token"])
+    pool_token_contract_module.transfer(
         amount=amount_to_withdraw,
         to=ctx.caller
     )
