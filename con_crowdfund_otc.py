@@ -342,52 +342,66 @@ def withdraw_contribution(pool_id: str):
 @export
 def withdraw_share(pool_id: str):
     pool = pool_fund[pool_id]
-    funder = contributor[ctx.caller, pool_id]
+    # It's good practice to get a fresh copy of funder from the hash if it's going to be modified
+    # and then written back.
+    funder = contributor[ctx.caller, pool_id] # Read once for checks and modification
 
+    # --- CHECKS ---
     assert pool, 'pool does not exist'
     assert funder and funder["amount_contributed"] > decimal("0.0"), 'no original contribution to claim a share for.'
     assert not funder["share_withdrawn"], 'share already withdrawn.'
     assert pool["otc_listing_id"], "OTC deal was not initiated for this pool."
     assert pool["amount_received"] > decimal("0.0"), 'Initial pool amount is zero, cannot calculate share.'
 
-    # --- Direct Foreign Read ---
-    # Create a ForeignHash to read from the otc_listing hash in the OTC contract
     otc_listings_foreign = ForeignHash(
         foreign_contract=metadata['otc_contract'],
-        foreign_name='otc_listing' # Name of the Hash in con_otc_exchange
+        foreign_name='otc_listing' 
     )
     otc_offer_details = otc_listings_foreign[pool["otc_listing_id"]]
-    # --- End Direct Foreign Read ---
 
     assert otc_offer_details, "OTC listing details not found on the exchange contract."
     assert otc_offer_details["status"] == "EXECUTED", 'OTC deal not successfully executed on the exchange contract.'
 
-    # If this is the first time seeing it executed, update local state for record keeping (optional but good)
+    # Update local pool status if this is the first time we see it executed.
+    # This part is an effect but related to overall pool state, not the user's specific withdrawal flag.
+    # It's generally okay here if it's idempotent or only updates once.
     if pool["status"] != "OTC_EXECUTED":
-        pool["status"] = "OTC_EXECUTED"
-        # The 'take_amount' in the OTC offer is what the maker (this crowdfund contract) received.
-        pool["otc_actual_received_amount"] = otc_offer_details["take_amount"]
-        pool_fund[pool_id] = pool
+        # Get a fresh reference if modifying pool_fund hash
+        current_pool_data = pool_fund[pool_id] 
+        current_pool_data["status"] = "OTC_EXECUTED"
+        current_pool_data["otc_actual_received_amount"] = otc_offer_details["take_amount"]
+        pool_fund[pool_id] = current_pool_data # Save changes to pool_fund
         
-        # Update otc_deal_info as well
-        deal_info = otc_deal_info[pool_id]
-        if deal_info: # Should exist if otc_listing_id exists
-            deal_info["status"] = "EXECUTED"
-            deal_info["actual_received_amount"] = pool["otc_actual_received_amount"]
-            otc_deal_info[pool_id] = deal_info
+        # Update otc_deal_info as well (if it exists)
+        current_deal_info = otc_deal_info[pool_id]
+        if current_deal_info: 
+            current_deal_info["status"] = "EXECUTED"
+            current_deal_info["actual_received_amount"] = current_pool_data["otc_actual_received_amount"]
+            otc_deal_info[pool_id] = current_deal_info
+        
+        # Re-assign pool variable to reflect the changes if it's used later for calculations.
+        # It's better to use current_pool_data for calculations after this point if its values changed.
+        pool = current_pool_data # Update local 'pool' variable to the modified data
 
     # Calculate share based on original contribution to total pooled funds
+    # Use pool["otc_actual_received_amount"] which is now guaranteed to be set if status was updated
     amount_of_take_token_to_withdraw = (funder["amount_contributed"] * pool["otc_actual_received_amount"]) / pool["amount_received"]
 
     assert amount_of_take_token_to_withdraw > decimal("0.0"), "Calculated share is zero or negative."
 
+    # --- EFFECTS (BEFORE INTERACTION) ---
+    # Mark the share as withdrawn *before* the external call.
+    funder["share_withdrawn"] = True 
+    contributor[ctx.caller, pool_id] = funder # Update the state in the Hash
+
+    # --- INTERACTION ---
+    # Now, make the external call. If it fails, the transaction will revert,
+    # including the state change above (funder["share_withdrawn"] = True).
     I.import_module(pool["otc_take_token"]).transfer(
         amount=amount_of_take_token_to_withdraw,
         to=ctx.caller
     )
-
-    funder["share_withdrawn"] = True
-    contributor[ctx.caller, pool_id] = funder
+    # No state changes after this point related to the funder's withdrawal status.
 
 # --- Helper/View functions (optional) ---
 @export

