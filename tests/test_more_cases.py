@@ -235,9 +235,12 @@ class TestCrowdfundContractMoreCases(unittest.TestCase):
             environment={"now": self._get_future_time(time_for_listing, days=7)}
         )
         otc_offer_on_otc_contract = self.con_otc.otc_listing[otc_listing_id2]
-        # Pooled amount was 100. Fee is 1%. Maker fee = 100 * 0.01 = 1.
-        # Amount offered on OTC = 100 - 1 = 99.
-        self.assertEqual(otc_offer_on_otc_contract['offer_amount'], decimal('99'))
+        # pooled_amount = decimal('100')
+        # otc_fee_percent = decimal('1.0')
+        # fee_rate = decimal('1.0') / decimal('100.0') = decimal('0.01')
+        # expected_offer_amount = decimal('100') / (decimal('1.0') + decimal('0.01'))
+        # expected_offer_amount = decimal('100') / decimal('1.01')
+        self.assertEqual(otc_offer_on_otc_contract['offer_amount'], decimal('100') / decimal('1.01'))
 
 
     def test_cancel_otc_listing_permissions_and_states_by_operator(self):
@@ -430,6 +433,144 @@ class TestCrowdfundContractMoreCases(unittest.TestCase):
         otc_deal_info_listed = self.con_crowdfund_otc.get_otc_deal_info_for_pool(pool_id=pool_id)
         self.assertEqual(otc_deal_info_listed['listing_id'], otc_listing_id)
         self.assertEqual(otc_deal_info_listed['listed_pool_token_amount'], bob_contrib_amount)
+    
+    # --- This test case was used to demonstrate that there was the vulnerability of trapped pool tokens ---
+    # def test_vulnerability_trapped_tokens_due_to_fee_miscalculation_on_listing(self):
+    #     print("\n--- Test: Vulnerability - Trapped Pool Tokens Due to Fee Miscalculation on OTC Listing ---")
+        
+    #     # Scenario:
+    #     # 1. OTC contract has a non-zero maker fee (F%).
+    #     # 2. Crowdfund (CF) contract pre-calculates Fee_A = P * F/100 on total pool_amount (P).
+    #     #    CF passes OfferAmount_Arg = P - Fee_A to OTC.list_offer.
+    #     # 3. OTC contract calculates its Fee_B = OfferAmount_Arg * F/100.
+    #     #    OTC pulls OfferAmount_Arg + Fee_B from CF.
+    #     # 4. Total tokens pulled from CF = P(1 - F/100)(1 + F/100) = P * (1 - (F/100)^2).
+    #     # 5. CF approved P tokens for OTC to spend.
+    #     # 6. Tokens remaining trapped in CF = P - P(1 - (F/100)^2) = P * (F/100)^2.
+
+    #     otc_fee_percentage = decimal('10.0') # 10% fee for pronounced effect
+    #     self.con_otc.adjust_fee(trading_fee=otc_fee_percentage, signer=self.operator)
+        
+    #     # Record initial balance of pool tokens in the crowdfund contract.
+    #     # This helps isolate changes for this specific test.
+    #     initial_cf_pool_token_balance = self.con_pool_token.balance_of(address=self.crowdfund_contract_name)
+
+    #     # Alice creates a pool
+    #     pool_id = self.con_crowdfund_otc.create_pool(
+    #         description="Trapped Token Test Pool", 
+    #         pool_token=self.pool_token_name,
+    #         hard_cap=decimal('200'), 
+    #         soft_cap=decimal('50'), 
+    #         signer=self.alice,
+    #         environment={"now": self.base_time}
+    #     )
+        
+    #     # Bob contributes P tokens
+    #     contribution_amount_p = decimal('100.0') # Use decimal for precision in calculations
+    #     contrib_time = self._get_future_time(self.base_time, days=1)
+    #     # Ensure Bob has enough allowance (setUp provides 1000)
+    #     self.con_crowdfund_otc.contribute(
+    #         pool_id=pool_id, 
+    #         amount=contribution_amount_p, 
+    #         signer=self.bob, 
+    #         environment={"now": contrib_time}
+    #     )
+        
+    #     # Crowdfund contract's balance of pool_token should now be initial_cf_pool_token_balance + P
+    #     expected_balance_after_contrib = initial_cf_pool_token_balance + contribution_amount_p
+    #     self.assertEqual(
+    #         self.con_pool_token.balance_of(address=self.crowdfund_contract_name),
+    #         expected_balance_after_contrib,
+    #         "Crowdfund contract balance mismatch after contribution."
+    #     )
+        
+    #     pool_info = self.con_crowdfund_otc.pool_fund[pool_id]
+    #     self.assertEqual(pool_info['amount_received'], contribution_amount_p)
+
+    #     # Alice lists the pool on OTC
+    #     time_for_listing = self._get_future_time(self.base_time, days=6) # After contrib deadline
+    #     otc_total_take_amount = decimal('500.0') # Arbitrary take amount
+        
+    #     otc_listing_id = self.con_crowdfund_otc.list_pooled_funds_on_otc(
+    #         pool_id=pool_id, 
+    #         otc_take_token=self.take_token_name,
+    #         otc_total_take_amount=otc_total_take_amount, 
+    #         signer=self.alice,
+    #         environment={"now": time_for_listing}
+    #     )
+    #     self.assertIsNotNone(otc_listing_id, "OTC listing failed.")
+
+    #     # Calculate expected trapped tokens: P * (F_rate)^2
+    #     fee_rate = otc_fee_percentage / decimal('100.0')
+    #     expected_trapped_tokens = contribution_amount_p * (fee_rate * fee_rate)
+        
+    #     # Expected balance in crowdfund contract after listing = initial_balance_before_this_pool_ops + P*F_rate^2
+    #     expected_balance_after_listing = initial_cf_pool_token_balance + expected_trapped_tokens
+    #     current_cf_balance_after_listing = self.con_pool_token.balance_of(address=self.crowdfund_contract_name)
+        
+    #     self.assertEqual(
+    #         current_cf_balance_after_listing,
+    #         expected_balance_after_listing,
+    #         f"Crowdfund contract balance mismatch after OTC listing. Expected trapped: {expected_trapped_tokens}, Got: {current_cf_balance_after_listing - initial_cf_pool_token_balance}"
+    #     )
+
+    #     # For completeness, let the OTC offer be taken and shares withdrawn
+    #     otc_offer = self.con_otc.otc_listing[otc_listing_id]
+    #     # Expected offer_amount on OTC: P_net = P(1-F_rate) = 100 * (1 - 0.1) = 90
+    #     expected_otc_offer_amount = contribution_amount_p * (decimal('1.0') - fee_rate)
+    #     self.assertEqual(otc_offer['offer_amount'], expected_otc_offer_amount)
+
+    #     time_for_taking_offer = self._get_future_time(time_for_listing, minutes=30)
+    #     # Charlie needs allowance for take_token + taker_fee
+    #     # Taker fee = otc_total_take_amount * fee_rate = 500 * 0.1 = 50
+    #     # Total needed by Charlie for take_token = 500 + 50 = 550. Charlie has 5000 in setUp.
+    #     self.con_otc.take_offer(
+    #         listing_id=otc_listing_id, 
+    #         signer=self.charlie,
+    #         environment={"now": time_for_taking_offer}
+    #     )
+        
+    #     # Crowdfund contract should have received otc_total_take_amount
+    #     self.assertEqual(
+    #         self.con_otc_take_token.balance_of(address=self.crowdfund_contract_name),
+    #         otc_total_take_amount,
+    #         "Crowdfund did not receive the correct amount of take_tokens."
+    #     )
+
+    #     # Bob withdraws his share
+    #     # Bob's initial take_token balance is 0 (from setUp).
+    #     bob_initial_take_token_bal = self.con_otc_take_token.balance_of(address=self.bob)
+    #     self.assertEqual(bob_initial_take_token_bal, decimal('0'))
+
+    #     self.con_crowdfund_otc.withdraw_share(
+    #         pool_id=pool_id, 
+    #         signer=self.bob, 
+    #         environment={"now": time_for_taking_offer}
+    #     )
+        
+    #     # Bob should get all otc_total_take_amount as he was the sole contributor of the 100 tokens.
+    #     self.assertEqual(
+    #         self.con_otc_take_token.balance_of(address=self.bob),
+    #         otc_total_take_amount,
+    #         "Bob did not receive the correct share of take_tokens."
+    #     )
+        
+    #     # Crowdfund contract should have 0 take_tokens left
+    #     self.assertEqual(
+    #         self.con_otc_take_token.balance_of(address=self.crowdfund_contract_name),
+    #         decimal('0'),
+    #         "Crowdfund should have no take_tokens left after shares are withdrawn."
+    #     )
+        
+    #     # Crucially, the pool_token balance in crowdfund contract remains unchanged (still has trapped tokens)
+    #     final_cf_pool_token_balance = self.con_pool_token.balance_of(address=self.crowdfund_contract_name)
+    #     self.assertEqual(
+    #         final_cf_pool_token_balance,
+    #         expected_balance_after_listing, # This is initial_cf_pool_token_balance + expected_trapped_tokens
+    #         "Trapped pool_tokens are still in the crowdfund contract after all operations."
+    #     )
+        
+    #     print(f"Test confirmed: {expected_trapped_tokens} pool_tokens are trapped in the crowdfund contract for pool_id {pool_id}.")
 
 
 if __name__ == '__main__':

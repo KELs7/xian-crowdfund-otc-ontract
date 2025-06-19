@@ -166,11 +166,27 @@ def list_pooled_funds_on_otc(pool_id: str, otc_take_token: str, otc_total_take_a
         foreign_name='fee'
     )
 
-    otc_maker_fee = (pool["amount_received"] * otc_fee_foreign.get()) / 100 
+    current_otc_fee_percent = otc_fee_foreign.get() # e.g., 10.0 for 10%
+
+    # Calculate the net amount to offer such that (net_amount + fee_on_net_amount) equals total pooled funds
+    # Let P = pool["amount_received"]
+    # Let F_rate = current_otc_fee_percent / 100
+    # We want to find X_offer_net such that X_offer_net * (1 + F_rate) = P
+    # So, X_offer_net = P / (1 + F_rate)
+    
+    if (decimal('1.0') + current_otc_fee_percent / decimal('100.0')) == decimal('0.0'):
+        # Avoid division by zero, though fee shouldn't make this factor zero.
+        # This case implies -100% fee, which is unlikely/disallowed.
+        assert False, "Cannot calculate offer amount with current fee yielding a zero divisor."
+
+    net_offer_amount_for_otc = pool["amount_received"] / (decimal('1.0') + current_otc_fee_percent / decimal('100.0'))
+    
+    # Ensure net_offer_amount is positive, otherwise listing on OTC will fail
+    assert net_offer_amount_for_otc > decimal("0.0"), "Calculated net offer amount for OTC is not positive."
 
     listing_id = otc_contract.list_offer(
         offer_token=pool["pool_token"],
-        offer_amount=pool["amount_received"] - otc_maker_fee, # the remaining pool tokens will be deducted to cover fee
+        offer_amount=net_offer_amount_for_otc, # Pass the correctly calculated net amount
         take_token=otc_take_token,
         take_amount=otc_total_take_amount
     )
