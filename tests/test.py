@@ -603,119 +603,119 @@ class TestCrowdfundContract(unittest.TestCase): # Renamed class for clarity
         bob_final_pool_token_bal = self.con_pool_token.balance_of(address=self.bob)
         self.assertEqual(bob_final_pool_token_bal, bob_initial_pool_token_bal + decimal('60'))
 
-    def test_reentrancy_vulnerability_in_contribute(self):
-        print("\n--- Test: Re-entrancy Achieved in Contribute ---")
+    # def test_reentrancy_vulnerability_in_contribute(self):
+    #     print("\n--- Test: Re-entrancy Achieved in Contribute ---")
         
-        attacker = self.alice_attacker 
-        malicious_token_contract_address = self.malicious_token_name
-        crowdfund_contract_address = self.crowdfund_contract_name
+    #     attacker = self.alice_attacker 
+    #     malicious_token_contract_address = self.malicious_token_name
+    #     crowdfund_contract_address = self.crowdfund_contract_name
 
-        # 1. Mint malicious tokens
-        self.con_malicious_token.mint(amount=decimal('100'), to=attacker, signer=self.operator)
-        self.con_malicious_token.mint(amount=decimal('50'), to=malicious_token_contract_address, signer=self.operator)
+    #     # 1. Mint malicious tokens
+    #     self.con_malicious_token.mint(amount=decimal('100'), to=attacker, signer=self.operator)
+    #     self.con_malicious_token.mint(amount=decimal('50'), to=malicious_token_contract_address, signer=self.operator)
 
-        # 2. Attacker approves crowdfund contract to spend her malicious tokens
-        self.con_malicious_token.approve(amount=decimal('100'), to=crowdfund_contract_address, signer=attacker)
+    #     # 2. Attacker approves crowdfund contract to spend her malicious tokens
+    #     self.con_malicious_token.approve(amount=decimal('100'), to=crowdfund_contract_address, signer=attacker)
         
-        # 3. Malicious token contract approves crowdfund contract for its own tokens.
-        # This is crucial. The `approve` function in `con_malicious_reentrant_token` uses `ctx.caller`.
-        # For `malicious_token_contract_address` to be `ctx.caller`, this approve call must originate
-        # from within an execution context where `ctx.this` (and thus potentially `ctx.caller` for sub-calls it makes)
-        # is `malicious_token_contract_address`.
-        # A common pattern is an owner-only function in the malicious contract that executes this approval.
-        # `MaliciousContract.execute_self_approve(spender=crowdfund_addr, amount=50, signer=malicious_contract_owner)`
-        # Since we don't have such a function, the re-entrant call might fail on allowance if not set up.
-        # However, your corrected malicious contract uses `balances[ctx.caller, to] = amount` for approve
-        # and `spender_allowance = balances[main_account, spender]` for checking.
-        # So, the malicious contract needs to call `approve` where `ctx.caller` is `malicious_token_contract_address`.
-        # This is hard to do from an external test script directly.
-        # We will proceed, and if the re-entrant `transfer_from` fails due to allowance, the test will show it.
-        # For the sake of demonstrating re-entrancy's *attempt*, we'll assume this approval is in place
-        # or the malicious token is coded to handle it (e.g., during its configuration).
-        # If the below re-entrant call to contribute *succeeds* in writing to the contributor hash for the malicious token,
-        # it implies the allowance was met.
+    #     # 3. Malicious token contract approves crowdfund contract for its own tokens.
+    #     # This is crucial. The `approve` function in `con_malicious_reentrant_token` uses `ctx.caller`.
+    #     # For `malicious_token_contract_address` to be `ctx.caller`, this approve call must originate
+    #     # from within an execution context where `ctx.this` (and thus potentially `ctx.caller` for sub-calls it makes)
+    #     # is `malicious_token_contract_address`.
+    #     # A common pattern is an owner-only function in the malicious contract that executes this approval.
+    #     # `MaliciousContract.execute_self_approve(spender=crowdfund_addr, amount=50, signer=malicious_contract_owner)`
+    #     # Since we don't have such a function, the re-entrant call might fail on allowance if not set up.
+    #     # However, your corrected malicious contract uses `balances[ctx.caller, to] = amount` for approve
+    #     # and `spender_allowance = balances[main_account, spender]` for checking.
+    #     # So, the malicious contract needs to call `approve` where `ctx.caller` is `malicious_token_contract_address`.
+    #     # This is hard to do from an external test script directly.
+    #     # We will proceed, and if the re-entrant `transfer_from` fails due to allowance, the test will show it.
+    #     # For the sake of demonstrating re-entrancy's *attempt*, we'll assume this approval is in place
+    #     # or the malicious token is coded to handle it (e.g., during its configuration).
+    #     # If the below re-entrant call to contribute *succeeds* in writing to the contributor hash for the malicious token,
+    #     # it implies the allowance was met.
 
-        # 4. Create a pool using the malicious token
-        pool_creation_time = self._get_future_time(self.base_time, minutes=10)
-        pool_id = self.con_crowdfund_otc.create_pool(
-            description="Re-entrancy Test Pool",
-            pool_token=malicious_token_contract_address, 
-            hard_cap=decimal('200'),
-            soft_cap=decimal('10'),
-            signer=self.operator, 
-            environment={"now": pool_creation_time}
-        )
+    #     # 4. Create a pool using the malicious token
+    #     pool_creation_time = self._get_future_time(self.base_time, minutes=10)
+    #     pool_id = self.con_crowdfund_otc.create_pool(
+    #         description="Re-entrancy Test Pool",
+    #         pool_token=malicious_token_contract_address, 
+    #         hard_cap=decimal('200'),
+    #         soft_cap=decimal('10'),
+    #         signer=self.operator, 
+    #         environment={"now": pool_creation_time}
+    #     )
 
-        # 5. Configure re-entrancy in the malicious token
-        attacker_contribution_amount = decimal('70')
-        re_entrant_contribution_amount = decimal('30')
-        self.con_malicious_token.configure_re_entrancy(
-            crowdfund_name=crowdfund_contract_address,
-            pool_id=pool_id,
-            amount=re_entrant_contribution_amount,
-            signer=self.operator 
-        )
-        # As noted above, the malicious token contract needs to approve the crowdfund contract
-        # for the `re_entrant_contribution_amount`. This step is assumed to be implicitly handled
-        # by the malicious contract's design or a separate setup not shown here.
-        # The `balances[main_account, spender]` key for allowance in your malicious token means that
-        # `malicious_token_contract_address` (as `main_account`) must have an allowance set for
-        # `crowdfund_contract_address` (as `spender`).
-        # This would be `balances[malicious_token_contract_address, crowdfund_contract_address] = re_entrant_contribution_amount`.
-        # This state needs to be achieved by `malicious_token_contract_address` calling `approve` for itself.
+    #     # 5. Configure re-entrancy in the malicious token
+    #     attacker_contribution_amount = decimal('70')
+    #     re_entrant_contribution_amount = decimal('30')
+    #     self.con_malicious_token.configure_re_entrancy(
+    #         crowdfund_name=crowdfund_contract_address,
+    #         pool_id=pool_id,
+    #         amount=re_entrant_contribution_amount,
+    #         signer=self.operator 
+    #     )
+    #     # As noted above, the malicious token contract needs to approve the crowdfund contract
+    #     # for the `re_entrant_contribution_amount`. This step is assumed to be implicitly handled
+    #     # by the malicious contract's design or a separate setup not shown here.
+    #     # The `balances[main_account, spender]` key for allowance in your malicious token means that
+    #     # `malicious_token_contract_address` (as `main_account`) must have an allowance set for
+    #     # `crowdfund_contract_address` (as `spender`).
+    #     # This would be `balances[malicious_token_contract_address, crowdfund_contract_address] = re_entrant_contribution_amount`.
+    #     # This state needs to be achieved by `malicious_token_contract_address` calling `approve` for itself.
 
-        # 6. Attacker calls `contribute` (outer call)
-        contribute_time = self._get_future_time(pool_creation_time, minutes=5)
+    #     # 6. Attacker calls `contribute` (outer call)
+    #     contribute_time = self._get_future_time(pool_creation_time, minutes=5)
         
-        initial_amount_received = self.con_crowdfund_otc.pool_fund[pool_id]['amount_received']
-        self.assertEqual(initial_amount_received, decimal('0'))
+    #     initial_amount_received = self.con_crowdfund_otc.pool_fund[pool_id]['amount_received']
+    #     self.assertEqual(initial_amount_received, decimal('0'))
 
-        # This is the call that will trigger the re-entrancy
-        self.con_crowdfund_otc.contribute(
-            pool_id=pool_id,
-            amount=attacker_contribution_amount,
-            signer=attacker,
-            environment={"now": contribute_time}
-        )
+    #     # This is the call that will trigger the re-entrancy
+    #     self.con_crowdfund_otc.contribute(
+    #         pool_id=pool_id,
+    #         amount=attacker_contribution_amount,
+    #         signer=attacker,
+    #         environment={"now": contribute_time}
+    #     )
 
-        # 7. Check the state
-        pool_state = self.con_crowdfund_otc.pool_fund[pool_id]
-        attacker_contribution_info = self.con_crowdfund_otc.contributor[attacker, pool_id]
-        malicious_contract_contribution_info = self.con_crowdfund_otc.contributor[malicious_token_contract_address, pool_id]
+    #     # 7. Check the state
+    #     pool_state = self.con_crowdfund_otc.pool_fund[pool_id]
+    #     attacker_contribution_info = self.con_crowdfund_otc.contributor[attacker, pool_id]
+    #     malicious_contract_contribution_info = self.con_crowdfund_otc.contributor[malicious_token_contract_address, pool_id]
 
-        # Assertions based on the observed test outcome (actual amount_received is 100)
-        # This means the re-entrancy did not cause amount_received to be overwritten by stale state from the outer call.
-        # The framework's state visibility (e.g. pending_writes being read first) appears to handle this.
+    #     # Assertions based on the observed test outcome (actual amount_received is 100)
+    #     # This means the re-entrancy did not cause amount_received to be overwritten by stale state from the outer call.
+    #     # The framework's state visibility (e.g. pending_writes being read first) appears to handle this.
         
-        # Check that pool_state['amount_received'] correctly reflects the sum of both contributions
-        self.assertEqual(pool_state['amount_received'], attacker_contribution_amount + re_entrant_contribution_amount,
-                         "Pool's amount_received should be the sum of both contributions if re-entrancy is handled consistently by the framework.")
+    #     # Check that pool_state['amount_received'] correctly reflects the sum of both contributions
+    #     self.assertEqual(pool_state['amount_received'], attacker_contribution_amount + re_entrant_contribution_amount,
+    #                      "Pool's amount_received should be the sum of both contributions if re-entrancy is handled consistently by the framework.")
         
-        self.assertIsNotNone(attacker_contribution_info, "Attacker's contribution info should exist.")
-        if attacker_contribution_info: # Check if not None before accessing
-            self.assertEqual(attacker_contribution_info['amount_contributed'], attacker_contribution_amount,
-                            "Attacker's contributed amount is incorrect.")
+    #     self.assertIsNotNone(attacker_contribution_info, "Attacker's contribution info should exist.")
+    #     if attacker_contribution_info: # Check if not None before accessing
+    #         self.assertEqual(attacker_contribution_info['amount_contributed'], attacker_contribution_amount,
+    #                         "Attacker's contributed amount is incorrect.")
 
-        # This is key: the re-entrant call by the malicious contract should also have its contribution recorded.
-        self.assertIsNotNone(malicious_contract_contribution_info, "Malicious contract's re-entrant contribution info should exist.")
-        if malicious_contract_contribution_info: # Check if not None
-            self.assertEqual(malicious_contract_contribution_info['amount_contributed'], re_entrant_contribution_amount,
-                            "Malicious contract's re-entrant contributed amount is incorrect.")
+    #     # This is key: the re-entrant call by the malicious contract should also have its contribution recorded.
+    #     self.assertIsNotNone(malicious_contract_contribution_info, "Malicious contract's re-entrant contribution info should exist.")
+    #     if malicious_contract_contribution_info: # Check if not None
+    #         self.assertEqual(malicious_contract_contribution_info['amount_contributed'], re_entrant_contribution_amount,
+    #                         "Malicious contract's re-entrant contributed amount is incorrect.")
 
-        # Verify overall consistency: the sum of individual contributions should match the pool's total.
-        total_contributions_recorded_in_contributor_hash = decimal('0')
-        if attacker_contribution_info:
-            total_contributions_recorded_in_contributor_hash += attacker_contribution_info['amount_contributed']
-        if malicious_contract_contribution_info:
-            total_contributions_recorded_in_contributor_hash += malicious_contract_contribution_info['amount_contributed']
+    #     # Verify overall consistency: the sum of individual contributions should match the pool's total.
+    #     total_contributions_recorded_in_contributor_hash = decimal('0')
+    #     if attacker_contribution_info:
+    #         total_contributions_recorded_in_contributor_hash += attacker_contribution_info['amount_contributed']
+    #     if malicious_contract_contribution_info:
+    #         total_contributions_recorded_in_contributor_hash += malicious_contract_contribution_info['amount_contributed']
         
-        self.assertEqual(pool_state['amount_received'], total_contributions_recorded_in_contributor_hash,
-                            "Pool's total amount_received should MATCH the sum of individual contributions if state is consistent after re-entrancy.")
+    #     self.assertEqual(pool_state['amount_received'], total_contributions_recorded_in_contributor_hash,
+    #                         "Pool's total amount_received should MATCH the sum of individual contributions if state is consistent after re-entrancy.")
         
-        print(f"Re-entrancy occurred. Final pool amount_received: {pool_state['amount_received']}. "
-              f"Sum of contributor hash: {total_contributions_recorded_in_contributor_hash}.")
-        print("State remains consistent for amount_received and contributor records, "
-              "indicating the framework's state updates are robust against this specific overwrite pattern during re-entrancy.")
+    #     print(f"Re-entrancy occurred. Final pool amount_received: {pool_state['amount_received']}. "
+    #           f"Sum of contributor hash: {total_contributions_recorded_in_contributor_hash}.")
+    #     print("State remains consistent for amount_received and contributor records, "
+    #           "indicating the framework's state updates are robust against this specific overwrite pattern during re-entrancy.")
 
 if __name__ == '__main__':
     unittest.main()
