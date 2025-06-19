@@ -257,7 +257,7 @@ def cancel_otc_listing_for_pool(pool_id: str):
 
     deal_info = otc_deal_info[pool_id]
     if deal_info:
-        deal_info["status"] = "CANCELLED_VIA_CROWDFUND"
+        deal_info["status"] = "CANCELLED"
         otc_deal_info[pool_id] = deal_info
 
     CancelledListing({"otc_listing_id": pool['otc_listing_id'], "pool_id": pool_id})
@@ -290,11 +290,15 @@ def withdraw_contribution(pool_id: str):
             otc_listings_foreign = ForeignHash(foreign_contract=metadata['otc_contract'], foreign_name='otc_listing')
             otc_offer_details = otc_listings_foreign[pool["otc_listing_id"]]
             if otc_offer_details:
-                if otc_offer_details["status"] == "CANCELLED": otc_listing_failed_or_expired = True
-                elif otc_offer_details["status"] == "OPEN" and now > pool["exchange_deadline"]: otc_listing_failed_or_expired = True
-                elif otc_offer_details["status"] == "EXECUTED": assert False, "OTC deal was executed. Use withdraw_share() instead."
+                if otc_offer_details["status"] == "CANCELLED": 
+                    otc_listing_failed_or_expired = True
+                elif otc_offer_details["status"] == "OPEN" and now > pool["exchange_deadline"]: 
+                    otc_listing_failed_or_expired = True
+                elif otc_offer_details["status"] == "EXECUTED": 
+                    assert False, "OTC deal was executed. Use withdraw_share() instead."
             else:
-                if now > pool["exchange_deadline"]: otc_listing_failed_or_expired = True
+                if now > pool["exchange_deadline"]: 
+                    otc_listing_failed_or_expired = True
         
         elif not pool["otc_listing_id"] and now > pool["exchange_deadline"]: # Not listed, deadlines passed
              if pool["amount_received"] < pool["soft_cap"] or \
@@ -318,11 +322,12 @@ def withdraw_contribution(pool_id: str):
     pool_fund[pool_id] = pool
     
     # 2. Update otc_deal_info if status changed due to failure/expiry
-    if new_pool_status_for_effect == "OTC_FAILED" and pool["status"] not in ["OTC_FAILED", "REFUNDING"]:
+    if new_pool_status_for_effect == "OTC_FAILED":
         deal_info = otc_deal_info[pool_id]
         if deal_info: 
-            deal_info["status"] = "FAILED_OR_EXPIRED"
-            otc_deal_info[pool_id] = deal_info
+            if deal_info.get("status") not in ["FAILED_OR_EXPIRED", "CANCELLED", "EXECUTED"]:
+                deal_info["status"] = "FAILED_OR_EXPIRED"
+                otc_deal_info[pool_id] = deal_info
             
     # 3. Update funder's contribution info (mark as withdrawn)
     funder["amount_contributed"] = decimal("0.0")
