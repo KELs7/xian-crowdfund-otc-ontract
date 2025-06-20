@@ -115,11 +115,17 @@ def list_offer(
     # However, the critical part is that the transfer_from happens before the listing is finalized in state.
 
     # Interaction: Transfer funds from maker
+    offer_amount_balance_before_transfer = offer_token_contract_module.balance_of(address=ctx.this)
+
     offer_token_contract_module.transfer_from(
         amount=offer_amount + maker_fee_to_collect,
         to=ctx.this,
         main_account=ctx.caller
     )
+
+    offer_amount_balance_after_transfer = offer_token_contract_module.balance_of(address=ctx.this)
+    actual_offer_amount_received = offer_amount_balance_after_transfer - offer_amount_balance_before_transfer
+    actual_offer_amount_received_without_fee = actual_offer_amount_received - maker_fee_to_collect
 
     current_time_for_id_and_listing = now
 
@@ -128,7 +134,7 @@ def list_offer(
         "maker": ctx.caller,
         "taker": None,
         "offer_token": offer_token,
-        "offer_amount": offer_amount,
+        "offer_amount": actual_offer_amount_received_without_fee,
         "take_token": take_token,
         "take_amount": take_amount,
         "date_listed": current_time_for_id_and_listing, # Use consistent time
@@ -141,7 +147,7 @@ def list_offer(
         "maker": ctx.caller,
         "taker": "None",
         "offer_token": offer_token,
-        "offer_amount": offer_amount,
+        "offer_amount": actual_offer_amount_received_without_fee,
         "take_token": take_token,
         "take_amount": take_amount,
         "date_listed": str(current_time_for_id_and_listing),
@@ -193,15 +199,22 @@ def take_offer(listing_id: str):
     # --- Interactions (External Calls) ---
     # 1. Taker sends their tokens (take_token + taker_fee) to the contract
     take_token_contract_instance = I.import_module(original_take_token)
+
+    take_amount_balance_before_transfer = take_token_contract_instance.balance_of(address=ctx.this)
+
     take_token_contract_instance.transfer_from(
         amount=original_take_amount + taker_fee_payable,
         to=ctx.this,
         main_account=ctx.caller # The taker
     )
 
+    take_amount_balance_after_transfer = take_token_contract_instance.balance_of(address=ctx.this)
+    actual_take_amount_received = take_amount_balance_after_transfer - take_amount_balance_before_transfer
+    actual_take_amount_received_without_fee = actual_take_amount_received - taker_fee_payable
+
     # 2. Contract sends take_tokens to the maker
     take_token_contract_instance.transfer( # Re-use imported module
-        amount=original_take_amount,
+        amount=actual_take_amount_received_without_fee,
         to=original_maker
     )
 
@@ -220,7 +233,7 @@ def take_offer(listing_id: str):
         "offer_token": original_offer_token,
         "offer_amount": original_offer_amount,
         "take_token": original_take_token,
-        "take_amount": original_take_amount,
+        "take_amount": actual_take_amount_received_without_fee,
         "date_taken": str(now),
         "fee": listing_fee_percent, # The fee percent for this specific offer
         "status": "EXECUTED",
